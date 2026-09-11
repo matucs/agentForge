@@ -1,0 +1,40 @@
+.PHONY: up down backend-test backend-lint backend-typecheck frontend-build frontend-typecheck test demo demo-failure eval
+
+up:
+	docker compose up -d --build
+	docker compose exec backend alembic upgrade head
+
+down:
+	docker compose down
+
+backend-lint:
+	cd backend && . .venv/bin/activate && ruff check app
+
+backend-typecheck:
+	cd backend && . .venv/bin/activate && mypy app
+
+backend-test:
+	cd backend && . .venv/bin/activate && pytest -q
+
+frontend-typecheck:
+	cd frontend && npx tsc --noEmit
+
+frontend-build:
+	cd frontend && npm run build
+
+test: backend-lint backend-typecheck backend-test frontend-typecheck frontend-build
+
+demo:
+	@echo "Not yet implemented — planned for Phase 10 (failure injection / demos)."
+	@echo "See docs/limitations.md for current project status."
+	@exit 1
+
+demo-failure:
+	@echo "Not yet implemented — planned for Phase 10 (failure injection / demos)."
+	@echo "See docs/limitations.md for current project status."
+	@exit 1
+
+eval:
+	@echo "Not yet implemented — planned for Phase 8 (evaluation harness)."
+	@echo "See docs/limitations.md for current project status."
+	@exit 1
