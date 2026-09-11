@@ -17,10 +17,10 @@ before they reach the final result.
 
 This repository is being built incrementally, phase by phase (see
 [docs/limitations.md](docs/limitations.md) for exactly what exists today vs.
-what's planned). **Phase 1 — repository scaffold and architecture
-foundation — is complete.** Agent orchestration, the verification gate, and
-the dashboard UI are not implemented yet; this phase establishes the
-substrate they will be built on.
+what's planned). **Phases 1–2 — repository scaffold, architecture
+foundation, and backend domain services — are complete.** Agent
+orchestration, the verification gate, and the dashboard UI are not
+implemented yet; these phases establish the substrate they will be built on.
 
 ### What works right now
 
@@ -32,6 +32,15 @@ substrate they will be built on.
   tasks, runs, agents, agent messages, artifacts, reviews, test results,
   security findings, verification results, approvals, evaluations, tool
   calls, and audit events.
+- Real CRUD APIs over that schema — `POST/GET /api/projects`,
+  `/api/tasks`, `/api/runs` — backed by a repository layer
+  (`backend/app/db/repositories.py`), with real foreign-key validation
+  (creating a task against an unknown project returns 404, not a raw DB
+  error).
+- A seeded agent registry (`GET /api/agents`) — the seven agents from the
+  spec (Planner, Architect, Researcher, Developer, Reviewer, QA, Security),
+  each with its real permission set (`allowed_tools`) from a data migration,
+  not hard-coded in a UI component.
 - A provider-agnostic `LLMProvider` abstraction with real Anthropic and
   OpenAI implementations (real API calls, real token/cost accounting from
   each response's actual usage) — a provider with no API key configured
@@ -43,11 +52,11 @@ substrate they will be built on.
 
 ### What's not built yet
 
-LangGraph orchestration, the seven engineering agents' actual logic, the
-deterministic verification gate, the policy engine, Git branch/PR
-automation, observability/evaluation pipelines, the full dashboard, and
-failure-injection demos are all planned in later phases — see the roadmap
-below and [docs/limitations.md](docs/limitations.md).
+LangGraph orchestration, the seven engineering agents' actual reasoning
+logic, the deterministic verification gate, the policy engine, Git
+branch/PR automation, observability/evaluation pipelines, the full
+dashboard, and failure-injection demos are all planned in later phases — see
+the roadmap below and [docs/limitations.md](docs/limitations.md).
 
 ## Architecture
 
@@ -115,7 +124,7 @@ npx tsc --noEmit && npm run build
 | Phase | Scope |
 |---|---|
 | 1 ✅ | Repo scaffold, DB schema, LLM provider abstraction, health check, CI |
-| 2 | Backend domain services (tasks/runs CRUD, repositories) |
+| 2 ✅ | Backend domain services (projects/tasks/runs CRUD, repositories, agent registry) |
 | 3 | LangGraph orchestration skeleton |
 | 4 | Planner / Architect / Researcher agents |
 | 5 | Developer / Reviewer / QA / Security agents |

@@ -46,6 +46,10 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+# B008: FastAPI's `Depends()` in argument defaults is the documented,
+# required dependency-injection pattern, not the mutable-default footgun
+# this rule targets elsewhere.
+ignore = ["B008"]
 
 [tool.mypy]
 python_version = "3.11"
@@ -55,4 +59,6 @@ namespace_packages = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]

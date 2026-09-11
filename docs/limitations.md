@@ -1,4 +1,4 @@
-# Limitations (current state, Phase 1)
+# Limitations (current state, Phase 2)
 
 This file exists so nothing in this repository is misrepresented. It is
 updated at the end of every phase.
@@ -15,12 +15,19 @@ updated at the end of every phase.
   must report as unavailable, never as a silent mock.
 - The database schema is real, migrated, and verified against a running
   Postgres 16 container in this environment.
+- `POST/GET /api/projects`, `/api/tasks`, `/api/runs`, and `GET /api/agents`
+  are real, tested against a live Postgres instance (transactional-rollback
+  fixtures, not mocks): creating a task under a nonexistent project, or a run
+  under a nonexistent task, returns a real 404 rather than a raw
+  IntegrityError. The seven-agent registry is populated by an Alembic data
+  migration, not hard-coded in a response handler.
 
 ## What does not exist yet
 
 - No agent (Planner, Architect, Researcher, Developer, Reviewer, QA,
-  Security) has been implemented. `backend/app/agents/` is currently empty
-  package scaffolding.
+  Security) has any reasoning logic implemented yet. `backend/app/agents/`
+  is currently empty package scaffolding; only their registry rows
+  (name/role/responsibilities/allowed_tools) exist.
 - No LangGraph orchestration graph exists yet (`backend/app/orchestration/`
   is scaffolding only).
 - No deterministic verification gate or policy engine exists yet
