@@ -1,4 +1,4 @@
-# Limitations (current state, Phase 3)
+# Limitations (current state, Phase 4)
 
 This file exists so nothing in this repository is misrepresented. It is
 updated at the end of every phase.
@@ -31,16 +31,41 @@ updated at the end of every phase.
   substituted slow graph to make the race deterministically testable, not to
   fake agent behavior.
 
+- **Planner, Architect, and Researcher agents are real** (`backend/app/agents/`):
+  each makes a real call through the `LLMProvider` abstraction and its
+  output is parsed with `Pydantic.model_validate` against a fixed schema
+  (`app/agents/schemas.py`) — a response that doesn't parse gets one
+  corrective retry, then the node raises (`app/agents/llm_json.py`); there
+  is no fallback plan/architecture/research content. Verified two ways in
+  this environment (no API key configured yet): the "no credentials" path
+  is exercised for real (`test_run_fails_cleanly_when_no_llm_provider_configured`,
+  and manually via a live HTTP request — the run ends `failed` with a
+  `PLANNER_FAILED` message carrying the real provider error text, zero
+  artifacts created); the real-generation path
+  (`test_run_produces_real_plan_architecture_research_with_live_llm`) is
+  `skipif`-guarded on a configured key and will start running automatically
+  once one is added to `backend/.env` — it is not run yet in this
+  environment.
+- **The Researcher's findings are grounded, not invented**: before calling
+  the LLM, `repo_tools.list_files`/`search_keyword` do a real, deterministic
+  filesystem scan of the task's project `repo_path`; any returned finding
+  citing a `file_path` outside that scan is discarded
+  (`researcher.filter_grounded_findings`, unit-tested directly) and recorded
+  separately as `discarded_ungrounded_findings` in the persisted artifact —
+  visible, not silently dropped.
+- Each of the three agents' structured output is persisted as a real
+  `Artifact` row (`GET /api/runs/:id/artifacts`, new in this phase), linked
+  from its `agent_messages` row via `artifact_id`.
+
 ## What does not exist yet
 
-- No agent (Planner, Architect, Researcher, Developer, Reviewer, QA,
-  Security) has any reasoning logic implemented yet. Each orchestration node
-  (`backend/app/orchestration/nodes.py`) writes one honestly-labeled
-  placeholder `agent_messages` row (`payload.implemented = false`) and
-  passes state through unchanged — no LLM call, no invented plan, finding,
-  or test result. Message `type` values are deliberately neutral
-  (`PLANNER_STEP_COMPLETED`, not `PLAN_CREATED`; `QA_STEP_COMPLETED`, not
-  `TEST_PASSED`) so nothing claims an outcome that was never computed.
+- No Developer/Reviewer/QA/Security reasoning logic exists yet. Those four
+  orchestration nodes (`backend/app/orchestration/nodes.py`) still write one
+  honestly-labeled placeholder `agent_messages` row
+  (`payload.implemented = false`) and pass state through unchanged — no LLM
+  call, no invented finding or test result. Message `type` values for these
+  four stay deliberately neutral (`QA_STEP_COMPLETED`, not `TEST_PASSED`) so
+  nothing claims an outcome that was never computed.
 - No deterministic verification gate or policy engine exists yet
   (`backend/app/verification/`, `backend/app/policy/` are scaffolding only).
   The `policy` node does not create an `Approval` row or pause the run.
@@ -103,3 +128,23 @@ updated at the end of every phase.
   engine, per ADR-001/ADR-002 — two Postgres client libraries against the
   same database. This is a deliberate, documented trade-off (the
   checkpointer library expects `psycopg`), not an oversight.
+
+## Known trade-offs made in Phase 4
+
+- The Researcher does a single deterministic retrieval pass (list files +
+  keyword search) before one LLM call — not a multi-turn agentic
+  tool-calling loop where the model could decide to search again based on
+  what it saw. This keeps the LLM abstraction thin (`LLMProvider.complete`,
+  one call in/one response out) and the grounding check simple, at the cost
+  of the Researcher being unable to "dig deeper" within a single run. A real
+  tool-calling loop is a reasonable future enhancement, not implemented here.
+- The Architect's `challenges` field is populated by the LLM (spec §5.2:
+  "should challenge the Planner when necessary") but nothing currently
+  *acts* on a non-empty `challenges` list — it's recorded in the artifact
+  and visible via the API, not yet wired into routing or a retry. That
+  wiring is a natural fit for the Phase 6 policy engine, not built yet.
+- Real-provider integration tests exist
+  (`test_run_produces_real_plan_architecture_research_with_live_llm`) but
+  have not actually executed against a live model in this environment — no
+  API key has been configured here yet. They are `skipif`-guarded, not
+  deleted or faked, and will run automatically once a key is added.

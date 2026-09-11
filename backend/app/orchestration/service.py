@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from langchain_core.runnables import RunnableConfig
 
 from app.config import get_settings
-from app.db.repositories import RunRepository, TaskRepository
+from app.db.repositories import ProjectRepository, RunRepository, TaskRepository
 from app.db.session import async_session_factory
 from app.orchestration.graph import build_graph, checkpointer_context
 from app.orchestration.state import AgentState
@@ -36,11 +36,15 @@ async def _load_initial_state(run_id: str) -> AgentState:
         task = await TaskRepository(session).get(run.task_id)
         if task is None:
             raise RunNotFoundError(f"task for run {run_id}")
+        project = await ProjectRepository(session).get(task.project_id)
+        if project is None:
+            raise RunNotFoundError(f"project for task {task.id}")
 
         return AgentState(
             run_id=run_id,
             task_id=task.id,
             requirement_text=task.requirement_text,
+            repo_path=project.repo_path,
             plan=None,
             architecture=None,
             research=None,

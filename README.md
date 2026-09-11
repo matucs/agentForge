@@ -17,10 +17,10 @@ before they reach the final result.
 
 This repository is being built incrementally, phase by phase (see
 [docs/limitations.md](docs/limitations.md) for exactly what exists today vs.
-what's planned). **Phases 1–3 — repository scaffold, backend domain
-services, and the LangGraph orchestration skeleton — are complete.** Real
-agent reasoning, the verification gate, and the dashboard UI are not
-implemented yet; these phases establish the substrate they will be built on.
+what's planned). **Phases 1–4 — repository scaffold, backend domain
+services, the LangGraph orchestration skeleton, and the Planner/Architect/
+Researcher agents — are complete.** Developer/Reviewer/QA/Security, the
+verification gate, and the dashboard UI are not implemented yet.
 
 ### What works right now
 
@@ -51,11 +51,21 @@ implemented yet; these phases establish the substrate they will be built on.
   edges, a hard iteration cap (`MAX_AGENT_ITERATIONS`), a workflow timeout
   (`MAX_WORKFLOW_SECONDS`), and cancellation — checkpointed into Postgres via
   `AsyncPostgresSaver` (real rows, verified directly in `checkpoints`/
-  `checkpoint_writes`). Node bodies are honest placeholders (no LLM calls,
-  no invented findings — see [docs/limitations.md](docs/limitations.md));
-  the graph mechanics around them are fully real and tested.
-  `POST /api/runs/:id/start`, `/cancel`, and `GET /api/runs/:id/events`
-  drive and observe it.
+  `checkpoint_writes`).
+- **Real Planner, Architect, and Researcher agents** (`backend/app/agents/`)
+  — each makes a real LLM call through the provider abstraction and produces
+  a schema-validated structured artifact (`GET /api/runs/:id/artifacts`):
+  a plan (requirements/subtasks/acceptance criteria/risks/dependencies), an
+  architecture proposal (the Architect is explicitly instructed to
+  challenge the plan, not rubber-stamp it), and research findings. The
+  Researcher's findings are grounded in a real, deterministic repository
+  scan (`repo_tools.py`) done *before* the LLM call — any finding citing a
+  file that scan never actually saw is discarded, not trusted. If no
+  provider is configured, the run fails cleanly with a real error message
+  (no fallback plan) — verified for both cases.
+- Developer/Reviewer/QA/Security are still Phase 3 stub placeholders (no
+  LLM calls, no invented findings) — see
+  [docs/limitations.md](docs/limitations.md).
 - A Next.js/TypeScript/Tailwind frontend that renders the *live* health
   response from the backend.
 - Docker Compose bringing up Postgres, Redis, backend, and frontend together.
@@ -63,12 +73,11 @@ implemented yet; these phases establish the substrate they will be built on.
 
 ### What's not built yet
 
-Real agent reasoning (the seven engineering agents currently emit no LLM
-output at all), the deterministic verification gate's actual rules, the
-policy engine, Git branch/PR automation, observability/evaluation
-pipelines, the full dashboard, and failure-injection demos are all planned
-in later phases — see the roadmap below and
-[docs/limitations.md](docs/limitations.md).
+Developer/Reviewer/QA/Security agent reasoning, the deterministic
+verification gate's actual rules, the policy engine, Git branch/PR
+automation, observability/evaluation pipelines, the full dashboard, and
+failure-injection demos are all planned in later phases — see the roadmap
+below and [docs/limitations.md](docs/limitations.md).
 
 ## Architecture
 
@@ -138,7 +147,7 @@ npx tsc --noEmit && npm run build
 | 1 ✅ | Repo scaffold, DB schema, LLM provider abstraction, health check, CI |
 | 2 ✅ | Backend domain services (projects/tasks/runs CRUD, repositories, agent registry) |
 | 3 ✅ | LangGraph orchestration skeleton (graph, retries, checkpointing, timeout, cancellation) |
-| 4 | Planner / Architect / Researcher agents |
+| 4 ✅ | Planner / Architect / Researcher agents (real LLM calls, grounded research) |
 | 5 | Developer / Reviewer / QA / Security agents |
 | 6 | Deterministic verification gate + policy engine |
 | 7 | Git integration (branches, diffs, PRs) |

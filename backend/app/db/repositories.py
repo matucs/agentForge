@@ -3,7 +3,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Agent, AgentMessage, Project, Run, Task
+from app.db.models import Agent, AgentMessage, Artifact, Project, Run, Task
 
 
 class ProjectRepository:
@@ -108,6 +108,27 @@ class AgentMessageRepository:
     async def list_by_run(self, run_id: str) -> list[AgentMessage]:
         result = await self._session.execute(
             select(AgentMessage).where(AgentMessage.run_id == run_id).order_by(AgentMessage.seq)
+        )
+        return list(result.scalars().all())
+
+
+class ArtifactRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def create(
+        self, *, run_id: str, type: str, produced_by: str, content: dict
+    ) -> Artifact:
+        artifact = Artifact(run_id=run_id, type=type, produced_by=produced_by, content=content)
+        self._session.add(artifact)
+        await self._session.flush()
+        return artifact
+
+    async def list_by_run(self, run_id: str) -> list[Artifact]:
+        result = await self._session.execute(
+            select(Artifact)
+            .where(Artifact.run_id == run_id)
+            .order_by(Artifact.created_at, Artifact.id)
         )
         return list(result.scalars().all())
 

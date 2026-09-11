@@ -70,6 +70,17 @@ class AgentMessageOut(BaseModel):
     created_at: datetime
 
 
+class ArtifactOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    run_id: str
+    type: str
+    produced_by: str
+    content: dict
+    created_at: datetime
+
+
 class AgentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

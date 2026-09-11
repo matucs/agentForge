@@ -7,6 +7,7 @@ def _state(**overrides) -> AgentState:
         "run_id": "run-1",
         "task_id": "task-1",
         "requirement_text": "req",
+        "repo_path": "/tmp/does-not-matter-for-routing",
         "plan": None,
         "architecture": None,
         "research": None,

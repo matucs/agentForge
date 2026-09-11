@@ -39,23 +39,69 @@ async def _poll_until_terminal(
     raise AssertionError(f"run {run_id} did not reach a terminal state within {timeout}s")
 
 
+def _has_real_llm_credentials() -> bool:
+    settings = get_settings()
+    return bool(settings.anthropic_api_key or settings.openai_api_key)
+
+
 @pytest.mark.asyncio
-async def test_run_executes_through_stub_pipeline(real_client: httpx.AsyncClient) -> None:
+async def test_run_fails_cleanly_when_no_llm_provider_configured(
+    real_client: httpx.AsyncClient,
+) -> None:
+    """With Phase 4, Planner makes a real LLM call. Without credentials this
+    must be a real, visible failure (spec §35: no fake AI) — never a
+    placeholder plan and never a silently "completed" run."""
+    if _has_real_llm_credentials():
+        pytest.skip("a real LLM provider is configured; this tests the unconfigured path")
+
     _, _, run_id = await _create_project_task_run(real_client)
 
     start_resp = await real_client.post(f"/api/runs/{run_id}/start")
     assert start_resp.status_code == 202
 
     run = await _poll_until_terminal(real_client, run_id)
+    assert run["status"] == "failed"
+
+    events = (await real_client.get(f"/api/runs/{run_id}/events")).json()
+    assert len(events) == 1
+    assert events[0]["type"] == "PLANNER_FAILED"
+    assert events[0]["payload"]["implemented"] is True
+    assert "error" in events[0]["payload"]
+
+    artifacts = (await real_client.get(f"/api/runs/{run_id}/artifacts")).json()
+    assert artifacts == []  # no plan artifact — the agent never produced one
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    not _has_real_llm_credentials(),
+    reason="requires a real ANTHROPIC_API_KEY or OPENAI_API_KEY in backend/.env",
+)
+async def test_run_produces_real_plan_architecture_research_with_live_llm(
+    real_client: httpx.AsyncClient,
+) -> None:
+    """Only runs when a real provider is configured. Exercises actual LLM
+    calls end to end for Planner/Architect/Researcher; Developer onward are
+    still Phase 3 stubs, so the run still completes structurally."""
+    _, _, run_id = await _create_project_task_run(real_client)
+
+    start_resp = await real_client.post(f"/api/runs/{run_id}/start")
+    assert start_resp.status_code == 202
+
+    run = await _poll_until_terminal(real_client, run_id, timeout=60.0)
     assert run["status"] == "completed"
-    assert run["iteration_count"] == 1  # developer runs exactly once: no stub finding retries it
+
+    artifacts = (await real_client.get(f"/api/runs/{run_id}/artifacts")).json()
+    artifacts_by_type = {a["type"]: a for a in artifacts}
+    assert set(artifacts_by_type) == {"plan", "architecture", "research"}
+    assert artifacts_by_type["plan"]["content"]["subtasks"]
 
     events = (await real_client.get(f"/api/runs/{run_id}/events")).json()
     event_types = [e["type"] for e in events]
     assert event_types == [
-        "PLANNER_STEP_COMPLETED",
-        "ARCHITECT_STEP_COMPLETED",
-        "RESEARCHER_STEP_COMPLETED",
+        "PLAN_CREATED",
+        "ARCHITECTURE_PROPOSED",
+        "RESEARCH_RESULT",
         "DEVELOPER_STEP_COMPLETED",
         "REVIEWER_STEP_COMPLETED",
         "QA_STEP_COMPLETED",
@@ -63,7 +109,6 @@ async def test_run_executes_through_stub_pipeline(real_client: httpx.AsyncClient
         "VERIFICATION_STEP_COMPLETED",
         "POLICY_STEP_COMPLETED",
     ]
-    assert all(e["payload"]["implemented"] is False for e in events)
 
 
 @pytest.mark.asyncio

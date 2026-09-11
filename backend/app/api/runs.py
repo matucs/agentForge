@@ -1,8 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.schemas import AgentMessageOut, RunCreate, RunOut
-from app.db.repositories import AgentMessageRepository, RunRepository, TaskRepository
+from app.api.schemas import AgentMessageOut, ArtifactOut, RunCreate, RunOut
+from app.db.repositories import (
+    AgentMessageRepository,
+    ArtifactRepository,
+    RunRepository,
+    TaskRepository,
+)
 from app.db.session import get_session
 from app.orchestration.service import (
     RunNotFoundError,
@@ -51,6 +56,17 @@ async def list_run_events(
         raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
     messages = await AgentMessageRepository(session).list_by_run(run_id)
     return [AgentMessageOut.model_validate(m) for m in messages]
+
+
+@router.get("/{run_id}/artifacts", response_model=list[ArtifactOut])
+async def list_run_artifacts(
+    run_id: str, session: AsyncSession = Depends(get_session)
+) -> list[ArtifactOut]:
+    run = await RunRepository(session).get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    artifacts = await ArtifactRepository(session).list_by_run(run_id)
+    return [ArtifactOut.model_validate(a) for a in artifacts]
 
 
 @router.post("/{run_id}/start", response_model=RunOut, status_code=202)

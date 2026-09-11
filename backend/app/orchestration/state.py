@@ -14,6 +14,7 @@ class AgentState(TypedDict):
     run_id: str
     task_id: str
     requirement_text: str
+    repo_path: str
 
     plan: dict | None
     architecture: dict | None
