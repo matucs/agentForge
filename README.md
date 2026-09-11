@@ -17,9 +17,9 @@ before they reach the final result.
 
 This repository is being built incrementally, phase by phase (see
 [docs/limitations.md](docs/limitations.md) for exactly what exists today vs.
-what's planned). **Phases 1–2 — repository scaffold, architecture
-foundation, and backend domain services — are complete.** Agent
-orchestration, the verification gate, and the dashboard UI are not
+what's planned). **Phases 1–3 — repository scaffold, backend domain
+services, and the LangGraph orchestration skeleton — are complete.** Real
+agent reasoning, the verification gate, and the dashboard UI are not
 implemented yet; these phases establish the substrate they will be built on.
 
 ### What works right now
@@ -45,6 +45,17 @@ implemented yet; these phases establish the substrate they will be built on.
   OpenAI implementations (real API calls, real token/cost accounting from
   each response's actual usage) — a provider with no API key configured
   reports itself as unavailable rather than faking a response.
+- A real **LangGraph orchestration graph** (`backend/app/orchestration/`)
+  wiring all nine steps (Planner → Architect → Researcher → Developer →
+  Reviewer → QA → Security → Verification → Policy) with conditional retry
+  edges, a hard iteration cap (`MAX_AGENT_ITERATIONS`), a workflow timeout
+  (`MAX_WORKFLOW_SECONDS`), and cancellation — checkpointed into Postgres via
+  `AsyncPostgresSaver` (real rows, verified directly in `checkpoints`/
+  `checkpoint_writes`). Node bodies are honest placeholders (no LLM calls,
+  no invented findings — see [docs/limitations.md](docs/limitations.md));
+  the graph mechanics around them are fully real and tested.
+  `POST /api/runs/:id/start`, `/cancel`, and `GET /api/runs/:id/events`
+  drive and observe it.
 - A Next.js/TypeScript/Tailwind frontend that renders the *live* health
   response from the backend.
 - Docker Compose bringing up Postgres, Redis, backend, and frontend together.
@@ -52,11 +63,12 @@ implemented yet; these phases establish the substrate they will be built on.
 
 ### What's not built yet
 
-LangGraph orchestration, the seven engineering agents' actual reasoning
-logic, the deterministic verification gate, the policy engine, Git
-branch/PR automation, observability/evaluation pipelines, the full
-dashboard, and failure-injection demos are all planned in later phases — see
-the roadmap below and [docs/limitations.md](docs/limitations.md).
+Real agent reasoning (the seven engineering agents currently emit no LLM
+output at all), the deterministic verification gate's actual rules, the
+policy engine, Git branch/PR automation, observability/evaluation
+pipelines, the full dashboard, and failure-injection demos are all planned
+in later phases — see the roadmap below and
+[docs/limitations.md](docs/limitations.md).
 
 ## Architecture
 
@@ -125,7 +137,7 @@ npx tsc --noEmit && npm run build
 |---|---|
 | 1 ✅ | Repo scaffold, DB schema, LLM provider abstraction, health check, CI |
 | 2 ✅ | Backend domain services (projects/tasks/runs CRUD, repositories, agent registry) |
-| 3 | LangGraph orchestration skeleton |
+| 3 ✅ | LangGraph orchestration skeleton (graph, retries, checkpointing, timeout, cancellation) |
 | 4 | Planner / Architect / Researcher agents |
 | 5 | Developer / Reviewer / QA / Security agents |
 | 6 | Deterministic verification gate + policy engine |

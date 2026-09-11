@@ -1,7 +1,9 @@
+from typing import Any
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Agent, Project, Run, Task
+from app.db.models import Agent, AgentMessage, Project, Run, Task
 
 
 class ProjectRepository:
@@ -63,6 +65,50 @@ class RunRepository:
         if status is not None:
             stmt = stmt.where(Run.status == status)
         result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def update(self, run_id: str, **fields: Any) -> Run | None:
+        run = await self._session.get(Run, run_id)
+        if run is None:
+            return None
+        for key, value in fields.items():
+            setattr(run, key, value)
+        await self._session.flush()
+        return run
+
+
+class AgentMessageRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def create(
+        self,
+        *,
+        run_id: str,
+        task_id: str,
+        from_agent: str,
+        to_agent: str,
+        type: str,
+        payload: dict,
+        artifact_id: str | None = None,
+    ) -> AgentMessage:
+        message = AgentMessage(
+            run_id=run_id,
+            task_id=task_id,
+            from_agent=from_agent,
+            to_agent=to_agent,
+            type=type,
+            artifact_id=artifact_id,
+            payload=payload,
+        )
+        self._session.add(message)
+        await self._session.flush()
+        return message
+
+    async def list_by_run(self, run_id: str) -> list[AgentMessage]:
+        result = await self._session.execute(
+            select(AgentMessage).where(AgentMessage.run_id == run_id).order_by(AgentMessage.seq)
+        )
         return list(result.scalars().all())
 
 

@@ -1,3 +1,5 @@
+import asyncio
+
 import httpx
 import pytest
 
@@ -73,6 +75,42 @@ async def test_run_creation_rejects_unknown_task(client: httpx.AsyncClient) -> N
 async def test_get_missing_project_returns_404(client: httpx.AsyncClient) -> None:
     resp = await client.get("/api/projects/does-not-exist")
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_created_at_is_a_real_per_row_timestamp_not_a_frozen_default(
+    real_client: httpx.AsyncClient,
+) -> None:
+    """Regression test: `server_default="now()"` (a bare Python string) binds
+    as a literal parameter, not raw SQL — Postgres then defaults every row to
+    whatever instant the column was created, forever. It must be
+    `server_default=text("now()")` (see app/db/models.py TimestampMixin).
+    Caught by comparing two rows created moments apart in separate,
+    separately-committed requests: with the bug, every created_at in the
+    table is bit-for-bit identical no matter when the row was inserted. This
+    needs `real_client` (real per-request commits), not `client` — the
+    latter wraps a whole test in one transaction, and Postgres's `now()` is
+    constant for the life of a transaction by design, which would make this
+    assertion meaningless."""
+    from datetime import UTC, datetime
+
+    first = (
+        await real_client.post(
+            "/api/projects", json={"name": "P1", "repo_path": "/r1", "description": None}
+        )
+    ).json()
+    await asyncio.sleep(0.05)
+    second = (
+        await real_client.post(
+            "/api/projects", json={"name": "P2", "repo_path": "/r2", "description": None}
+        )
+    ).json()
+
+    first_created = datetime.fromisoformat(first["created_at"])
+    second_created = datetime.fromisoformat(second["created_at"])
+
+    assert second_created > first_created
+    assert (datetime.now(UTC) - second_created).total_seconds() < 30
 
 
 @pytest.mark.asyncio

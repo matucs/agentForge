@@ -9,7 +9,18 @@ entity.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    DateTime,
+    Float,
+    ForeignKey,
+    Identity,
+    Integer,
+    String,
+    Text,
+    text,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -22,7 +33,14 @@ class Base(DeclarativeBase):
 
 
 class TimestampMixin:
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default="now()")
+    # `server_default=text("now()")` is required here, not the bare string
+    # "now()" — a plain string is bound as a literal parameter (baking in
+    # the timestamp at migration-apply time, identical for every row ever
+    # inserted afterward), not raw SQL. Confirmed by inspecting
+    # information_schema.columns.column_default after each form.
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
 
 
 class Project(Base, TimestampMixin):
@@ -84,6 +102,12 @@ class AgentMessage(Base, TimestampMixin):
     __tablename__ = "agent_messages"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    # Monotonic ordering key: two messages committed in the same instant
+    # (e.g. fast stub node execution) can share an identical `created_at`
+    # timestamp, and `id` is a random UUID with no relation to insertion
+    # order — an ORDER BY on either alone can scramble a run's real event
+    # order. A DB-generated identity column guarantees correct ordering.
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(), unique=True, nullable=False)
     run_id: Mapped[str] = mapped_column(ForeignKey("runs.id"), nullable=False)
     task_id: Mapped[str] = mapped_column(String, nullable=False)
     from_agent: Mapped[str] = mapped_column(String, nullable=False)

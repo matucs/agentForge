@@ -4,6 +4,7 @@ import httpx
 import pytest
 import pytest_asyncio
 from asgi_lifespan import LifespanManager
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.session import engine, get_session
@@ -41,6 +42,26 @@ async def client(db_session: AsyncSession) -> AsyncIterator[httpx.AsyncClient]:
             yield ac
 
     app.dependency_overrides.pop(get_session, None)
+
+
+@pytest_asyncio.fixture
+async def real_client() -> AsyncIterator[httpx.AsyncClient]:
+    """Unlike `client`, this performs *real* commits — required for
+    orchestration tests, where the background run executes on its own DB
+    connection and must see committed project/task/run rows (the same
+    constraint a real multi-process deployment would have). Rows created
+    through it are deleted at teardown so repeated runs don't accumulate
+    data in the dev database."""
+    async with LifespanManager(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+            yield ac
+
+    async with engine.begin() as conn:
+        await conn.execute(text("DELETE FROM agent_messages"))
+        await conn.execute(text("DELETE FROM runs"))
+        await conn.execute(text("DELETE FROM tasks"))
+        await conn.execute(text("DELETE FROM projects"))
 
 
 @pytest.fixture

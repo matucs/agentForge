@@ -58,6 +58,18 @@ class RunOut(BaseModel):
     created_at: datetime
 
 
+class AgentMessageOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    run_id: str
+    from_agent: str
+    to_agent: str
+    type: str
+    payload: dict
+    created_at: datetime
+
+
 class AgentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

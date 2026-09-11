@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted (orchestration graph itself is implemented in Phase 3, not yet built).
+Accepted and implemented (Phase 3): the graph, checkpointer, retry routing,
+iteration cap, timeout, and cancellation are real and tested. Node bodies
+are still honest placeholders — see docs/limitations.md — Phase 4/5 replace
+them without changing anything described here.
 
 ## Context
 
@@ -41,12 +44,24 @@ explicit `max_iterations` cutoff enforced in code, not by convention.
 
 ## Consequences
 
-- LangGraph's checkpointer becomes the source of truth for "where is this run
-  right now," which the API layer queries to answer `GET /api/runs/:id`.
+- As implemented, the API layer answers `GET /api/runs/:id` and
+  `GET /api/runs/:id/events` from our own `runs`/`agent_messages` Postgres
+  tables (per ADR-002), not by reading LangGraph's checkpointer directly —
+  those tables are simpler to query relationally and are what the
+  dashboard needs. LangGraph's checkpointer (`AsyncPostgresSaver`, its own
+  `checkpoints`/`checkpoint_writes` tables in the same database) is real
+  and durable, but its role turned out to be narrower than originally
+  expected here: it lets a run resume from its last completed node — the
+  actual within-run replay/resume mechanism — rather than being the API's
+  read path.
 - We take a dependency on LangGraph's abstractions (state reducers, node
   signatures) throughout `backend/app/orchestration/`. If LangGraph were
   abandoned, this layer — not the agents themselves, which only depend on
   `LLMProvider` and repositories — would need a rewrite.
 - Retry limits, timeouts, and cancellation are graph-level concerns we must
   configure explicitly; LangGraph does not prevent an infinite loop by
-  default, it gives us the primitives to bound one.
+  default, it gives us the primitives to bound one. Implemented as: an
+  iteration cap compared in `routing.py`, `asyncio.wait_for` around the
+  graph invocation for the timeout, and an in-process task registry for
+  cancellation (see docs/limitations.md for that registry's one durability
+  caveat).
