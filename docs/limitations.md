@@ -1,4 +1,4 @@
-# Limitations (current state, Phase 9)
+# Limitations (current state, Phase 10)
 
 This file exists so nothing in this repository is misrepresented. It is
 updated at the end of every phase.
@@ -185,8 +185,11 @@ updated at the end of every phase.
   environment (no key configured here). Reviewer/QA/Security detection
   rate is intentionally left unmeasured (`EvaluationRun.reviewer_correct`
   etc. stay `None`) rather than invented — computing it honestly needs a
-  task with a *known* injected bug to check detection against, which is
-  Phase 10's failure-injection harness, not built yet.
+  task with a *known* injected bug to check detection against. Phase 10's
+  failure-injection demos (below) prove the deterministic gate catches
+  known-injected bugs when invoked directly; wiring that same known-bug
+  signal into the eval harness's per-run scoring is not done and would be
+  its own follow-up, not assumed here.
 - **The full frontend dashboard is real** (`frontend/src/app/`): every page
   is a client component fetching from the live backend — `/`, `/runs`,
   `/runs/[id]`, `/tasks`, `/tasks/[id]`, `/agents`, `/evaluations`,
@@ -205,10 +208,33 @@ updated at the end of every phase.
   `POST /api/projects`/`/api/tasks`/`/api/runs` +
   `POST /api/runs/:id/start` sequence the backend's own tests use — no
   separate "demo" code path.
+- **The failure-injection demos are real** (`backend/app/demos/`,
+  spec §13). Scenarios 2–4 (`make demo-failure`) need no LLM and always run:
+  a disposable git fixture repo, a real commit standing in for "Developer
+  just wrote this" (a genuinely broken `add()`'s subtraction bug, a
+  genuinely hardcoded `AKIA...`-shaped AWS key, a genuine Alembic migration
+  file), Reviewer's approval simulated and explicitly labeled as such in the
+  module docstring and code comments (never hidden), then the real
+  `qa_node` → `security_node` → `verification_node` → `policy_node` executed
+  in sequence exactly as LangGraph would merge them. Verified live in this
+  environment: Scenario 2's real `pytest` subprocess genuinely fails against
+  the broken `add()` and the real Verification Gate genuinely blocks despite
+  the simulated approval (`final_decision=BLOCKED_BY_VERIFICATION`);
+  Scenario 3's real regex scan genuinely finds the secret and blocks the
+  same way; Scenario 4's real `classify_risk` genuinely rates the
+  `alembic/versions/...` path `high`, producing
+  `final_decision=PENDING_HUMAN_APPROVAL`. Scenario 1 (Reviewer genuinely
+  catching the bug via a real LLM call) and `make demo` (one real task
+  through the full pipeline) are both gated on real LLM credentials —
+  confirmed to print "Integration unavailable. Configure ANTHROPIC_API_KEY
+  or OPENAI_API_KEY to enable this feature." and exit non-zero rather than
+  fake a run, since no key is configured in this environment.
 
 ## What does not exist yet
 
-- No failure-injection demos yet.
+- No cleanup of the Project/Task/Run rows the demo scripts create in the
+  real dev database (only their temp git repos are cleaned up, via
+  `tempfile.TemporaryDirectory`) — see Phase 10 trade-offs below.
 - No dependency/CVE vulnerability database check — Security is a static
   pattern scan only (see Phase 5 trade-offs).
 - No Slack/n8n notification when a run reaches `awaiting_approval` — an
@@ -470,3 +496,37 @@ updated at the end of every phase.
   likely use the already-real Redis pub/sub or a WebSocket rather than
   polling — not built here, since polling is sufficient to demonstrate the
   real data flow honestly.
+
+## Known trade-offs made in Phase 10
+
+- **The Project/Task/Run rows the demo scripts create are not deleted.**
+  Each scenario in `failure_scenarios.py`/`full_demo.py` cleans up its
+  temporary git fixture repo (`tempfile.TemporaryDirectory`'s context
+  manager), but the database rows are left in place — unlike the
+  `real_client` test fixture, which deletes what it creates at teardown.
+  This matches how a real "demo run" would look in the dashboard (it's a
+  real run, not a fixture to be hidden), but it does mean repeated
+  `make demo-failure`/`make demo` invocations accumulate rows in the dev
+  database. Most tests are unaffected (the transactional `db_session`/
+  `client` fixtures isolate each test via rollback, not raw table counts),
+  but `test_operations_summary_reflects_real_run_status_counts` counts real
+  rows visible to its transaction under Postgres' READ COMMITTED default —
+  running the demos and that test back-to-back in the same dev database
+  could make its counts drift. Verified clean in this environment (ran the
+  demos, then the full suite, twice — no leftover rows and no flakiness
+  observed since the dev Postgres volume was recreated fresh partway
+  through this phase), but giving the demos their own cleanup, or scoping
+  that test to only its own rows, is a reasonable follow-up, not done here.
+- **Scenario 2/3/4's "Developer" step is a hand-written commit, not a real
+  LLM Developer agent invocation.** This is the same trade-off spec §13
+  calls for — proving the deterministic tail overrides an incorrect
+  approval doesn't require spending an LLM call on the bug itself, only on
+  making sure the bug is genuinely present in the file the deterministic
+  nodes genuinely inspect. The bug/secret/migration content is real code
+  actually committed to a real repo; only its authorship is scripted rather
+  than LLM-generated.
+- **Reviewer's approval in Scenarios 2–4 is simulated (`review_findings=
+  []`), not a real LLM call**, and this is stated in the module docstring,
+  in a code comment at the exact line it's set, and printed as "(simulated)"
+  in every scenario's console output — never presented as if a real
+  Reviewer approved the change.

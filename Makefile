@@ -25,14 +25,10 @@ frontend-build:
 test: backend-lint backend-typecheck backend-test frontend-typecheck frontend-build
 
 demo:
-	@echo "Not yet implemented — planned for Phase 10 (failure injection / demos)."
-	@echo "See docs/limitations.md for current project status."
-	@exit 1
+	cd backend && . .venv/bin/activate && python -m app.demos.full_demo
 
 demo-failure:
-	@echo "Not yet implemented — planned for Phase 10 (failure injection / demos)."
-	@echo "See docs/limitations.md for current project status."
-	@exit 1
+	cd backend && . .venv/bin/activate && python -m app.demos.failure_scenarios
 
 eval:
 	cd backend && . .venv/bin/activate && python -m app.evaluation.runner

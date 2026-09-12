@@ -172,12 +172,30 @@ are complete.**
   (the backend image includes a real `git` CLI + identity, needed by
   Developer/Reviewer).
 - CI (GitHub Actions) running lint, type-check, and tests on every push.
+- **`make demo-failure`** (`backend/app/demos/failure_scenarios.py`) — the
+  spec's four failure-injection scenarios. Scenarios 2–4 need no LLM at all
+  and run fully for real every time: a disposable git fixture repo, a real
+  commit standing in for "Developer just wrote this" (a genuinely broken
+  `add()`, a genuinely hardcoded AWS-key-shaped secret, a genuine Alembic
+  migration file), Reviewer's approval simulated and explicitly labeled as
+  such, then the real `qa_node` → `security_node` → `verification_node` →
+  `policy_node` run in sequence against it. Verified live: Scenario 2's real
+  `pytest` run genuinely fails and Verification genuinely blocks despite the
+  simulated approval (`final_decision=BLOCKED_BY_VERIFICATION`); Scenario 3's
+  real regex scan genuinely finds the secret and blocks the same way;
+  Scenario 4's real risk classifier genuinely rates the migration path
+  `high` and produces `final_decision=PENDING_HUMAN_APPROVAL`. Scenario 1
+  (Reviewer catching the bug via a real LLM call) is gated on real
+  credentials — prints "Integration unavailable" and is skipped, not faked,
+  when none are configured.
+- **`make demo`** (`backend/app/demos/full_demo.py`) — one real task through
+  the complete live pipeline with a live agent-activity feed printed as
+  events occur; gated on real LLM credentials the same way.
 
 ### What's not built yet
 
-Failure-injection demos, n8n/Slack integration, and further hardening are
-planned in later phases — see the roadmap below and
-[docs/limitations.md](docs/limitations.md).
+n8n/Slack integration and further hardening are planned in later phases —
+see the roadmap below and [docs/limitations.md](docs/limitations.md).
 
 ## Architecture
 
@@ -253,7 +271,7 @@ npx tsc --noEmit && npm run build
 | 7 ✅ | Git integration: real GitHub PR creation (push + REST API) |
 | 8 ✅ | Observability (structured logs, metrics, tracing, real cost/budget tracking) + evaluation harness |
 | 9 ✅ | Frontend dashboard (runs, tasks, agents, approvals, operations, evaluations) |
-| 10 | Failure-injection demos |
+| 10 ✅ | Failure-injection demos (`make demo-failure`, `make demo`) |
 | 11 | n8n / Slack integration |
 | 12 | Hardening, full test suite, deployment docs |
 
