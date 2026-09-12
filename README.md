@@ -13,6 +13,17 @@ what actually merges. AgentForge does not try to make AI infallible; it
 designs the system so AI mistakes are detectable, recoverable, and blocked
 before they reach the final result.
 
+**Live**: [agentforge-two.vercel.app](https://agentforge-two.vercel.app) (frontend) /
+[agentforge.158-180-19-147.nip.io](https://agentforge.158-180-19-147.nip.io) (API), running
+against a real Postgres (Neon) and Redis (Upstash), same free-tier
+Oracle Cloud VM topology as [LivePulse's Portfolio Mode](https://github.com/matucs/LivePulse/blob/main/docs/deployment.md).
+Deployed with no LLM key configured, so the dashboard, agent registry, and
+deterministic verification/policy logic are all real and live — starting a
+full agent run honestly reports "Integration unavailable" rather than
+faking one; the LLM-dependent paths are demonstrated by the failure-injection
+demos and this repo's own test suite instead (see
+[docs/limitations.md](docs/limitations.md)).
+
 ## Status
 
 This repository was built incrementally, phase by phase (see

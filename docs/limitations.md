@@ -3,6 +3,32 @@
 This file exists so nothing in this repository is misrepresented. It is
 updated at the end of every phase.
 
+## Live deployment (post-Phase 12, added on request)
+
+Deployed the same way as the LivePulse portfolio project: frontend on
+Vercel ([agentforge-two.vercel.app](https://agentforge-two.vercel.app)),
+backend as a Docker container on the same free-tier Oracle Cloud Always
+Free VM already running LivePulse and TalentMatch, fronted by the same
+Caddy instance via a free `nip.io` domain with automatic TLS
+([agentforge.158-180-19-147.nip.io](https://agentforge.158-180-19-147.nip.io)).
+Postgres is a real Neon project (not the local Docker Compose instance);
+Redis is a real Upstash instance shared with the other two projects on
+that VM (safe: AgentForge's only Redis usage is a health-check `PING`,
+never a read/write of any key).
+
+**Deliberately deployed without ANTHROPIC_API_KEY/OPENAI_API_KEY
+configured.** The dashboard, seeded agent registry, and deterministic
+verification/policy code are all real and reachable; creating and
+starting a real run was manually verified to fail honestly (`status:
+"failed"`) rather than fake a result, since a public "start a run" button
+backed by a real paid LLM key would be an open-ended cost/abuse risk this
+project's own budget guardrails (`MAX_RUN_BUDGET_USD`) only cap per-run,
+not across unlimited public traffic. A real found-and-fixed bug from this
+deployment: `_checkpointer_conn_string`'s scheme swap didn't handle
+`?ssl=require` (needed for asyncpg/SQLAlchemy against Neon) vs. `sslmode`
+(the only spelling psycopg/libpq accepts) — see `graph.py` and
+`tests/test_checkpointer_conn_string.py`.
+
 ## What is real right now
 
 - `/api/health` performs a real `SELECT 1` against Postgres and a real
