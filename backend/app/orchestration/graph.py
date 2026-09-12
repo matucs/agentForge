@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import END, StateGraph
@@ -23,9 +24,21 @@ from app.orchestration.state import AgentState
 def _checkpointer_conn_string() -> str:
     """AsyncPostgresSaver uses psycopg, not asyncpg — the domain schema's
     driver (see ADR-002). Same database, a separate driver/connection pool
-    dedicated to checkpoint storage, per the LangGraph-recommended setup."""
+    dedicated to checkpoint storage, per the LangGraph-recommended setup.
+
+    A managed Postgres provider that requires TLS (e.g. Neon) needs
+    `?ssl=require` in DATABASE_URL for asyncpg/SQLAlchemy — but psycopg/libpq
+    has no `ssl` query parameter, only `sslmode`, and rejects an unknown one
+    outright. Translate it rather than assume DATABASE_URL never carries a
+    query string, which the previous plain scheme-replace did."""
     settings = get_settings()
-    return settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
+    url = settings.database_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+    parts = urlsplit(url)
+    query_pairs = [
+        ("sslmode", value) if key == "ssl" else (key, value)
+        for key, value in parse_qsl(parts.query, keep_blank_values=True)
+    ]
+    return urlunsplit((*parts[:3], urlencode(query_pairs), parts.fragment))
 
 
 @asynccontextmanager
