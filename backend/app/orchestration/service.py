@@ -80,9 +80,17 @@ async def _run_graph(run_id: str) -> None:
             )
 
         async with async_session_factory() as session:
-            await RunRepository(session).update(
+            repo = RunRepository(session)
+            # policy_node (Phase 6) already sets the real terminal status —
+            # "completed", "blocked", or "awaiting_approval" — before the
+            # graph reaches END. Only fall back to "completed" here if that
+            # never happened (e.g. an older/placeholder policy node), so
+            # this never clobbers a real block/approval-pending decision.
+            current = await repo.get(run_id)
+            status = current.status if current and current.status != "running" else "completed"
+            await repo.update(
                 run_id,
-                status="completed",
+                status=status,
                 finished_at=datetime.now(UTC),
                 iteration_count=final_state["iteration_count"],
                 final_decision=final_state.get("final_decision"),

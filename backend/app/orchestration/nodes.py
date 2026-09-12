@@ -1,19 +1,11 @@
 """Orchestration graph nodes.
 
-Planner/Architect/Researcher (Phase 4) and Developer/Reviewer (Phase 5) call
-a real LLM via the provider abstraction and persist real structured
-artifacts/rows — see app/agents/. QA and Security (Phase 5) are
-deterministic — real subprocess test execution and a real static scan, no
-LLM. On any failure (no configured provider, git failure, etc.) a node
-writes a `*_FAILED` message and re-raises; it does not fall back to
-placeholder content, per spec §35.
-
-Verification/Policy are still honest placeholders (Phase 6): one real
-`agent_messages` row documenting that the step ran, with a payload that
-plainly states no agent reasoning has been implemented yet, and a neutral
-`*_STEP_COMPLETED` message type rather than an outcome-asserting spec §7
-type (`VERIFICATION_PASSED`, ...) — that would misrepresent a decision that
-was never actually made.
+Planner/Architect/Researcher (Phase 4), Developer/Reviewer (Phase 5), and
+Verification/Policy (Phase 6) call a real LLM (the first four) or run real
+deterministic checks (QA/Security/Verification/Policy) and persist real
+rows — see app/agents/, app/verification/, app/policy/. On any failure (no
+configured provider, git failure, etc.) a node writes a `*_FAILED` message
+and re-raises; it does not fall back to placeholder content, per spec §35.
 """
 
 import dataclasses
@@ -28,39 +20,22 @@ from app.agents.schemas import ArchitectOutput, PlannerOutput, ResearchOutput
 from app.agents.security import run_security_scan
 from app.db.repositories import (
     AgentMessageRepository,
+    ApprovalRepository,
     ArtifactRepository,
     ReviewRepository,
     RunRepository,
     SecurityFindingRepository,
     TestResultRepository,
+    VerificationResultRepository,
 )
 from app.db.session import async_session_factory
 from app.git_integration.git_ops import changed_files, get_diff
 from app.orchestration.state import AgentState
+from app.policy.engine import classify_risk, decide_policy
+from app.verification.checks import run_lint, run_typecheck
+from app.verification.gate import evaluate_gate
 
 _BASE_REF = "main"
-
-NOT_IMPLEMENTED_NOTE = "Agent reasoning not implemented yet (see roadmap Phase 5/6)."
-
-
-async def _emit(
-    state: AgentState,
-    *,
-    from_agent: str,
-    to_agent: str,
-    message_type: str,
-) -> None:
-    async with async_session_factory() as session:
-        await AgentMessageRepository(session).create(
-            run_id=state["run_id"],
-            task_id=state["task_id"],
-            from_agent=from_agent,
-            to_agent=to_agent,
-            type=message_type,
-            payload={"implemented": False, "note": NOT_IMPLEMENTED_NOTE},
-        )
-        await session.commit()
-
 
 async def _persist_artifact_and_message(
     state: AgentState,
@@ -383,24 +358,103 @@ async def security_node(state: AgentState) -> dict:
 
 
 async def verification_node(state: AgentState) -> dict:
-    await _emit(
-        state,
-        from_agent="security",
-        to_agent="verification",
-        message_type="VERIFICATION_STEP_COMPLETED",
+    try:
+        typecheck_result = run_typecheck(state["repo_path"])
+        lint_result = run_lint(state["repo_path"])
+    except Exception as exc:
+        await _emit_failure(
+            state,
+            from_agent="security",
+            to_agent="verification",
+            message_type="VERIFICATION_FAILED",
+            error=str(exc),
+        )
+        raise
+
+    gate_result = evaluate_gate(
+        reviewer_findings=state["review_findings"],
+        test_results=state["test_results"],
+        security_findings=state["security_findings"],
+        typecheck_result=typecheck_result,
+        lint_result=lint_result,
     )
-    return {"verification_result": {"implemented": False}}
+
+    async with async_session_factory() as session:
+        for check in gate_result.checks:
+            await VerificationResultRepository(session).create(
+                run_id=state["run_id"],
+                gate=check.gate,
+                passed=check.passed,
+                detail={"detail": check.detail},
+            )
+        message_type = (
+            "VERIFICATION_PASSED" if gate_result.overall_passed else "VERIFICATION_FAILED"
+        )
+        await AgentMessageRepository(session).create(
+            run_id=state["run_id"],
+            task_id=state["task_id"],
+            from_agent="verification",
+            to_agent="policy",
+            type=message_type,
+            payload={
+                "overall_passed": gate_result.overall_passed,
+                "blocking_reasons": gate_result.blocking_reasons,
+            },
+        )
+        await session.commit()
+
+    return {
+        "verification_result": {
+            "overall_passed": gate_result.overall_passed,
+            "blocking_reasons": gate_result.blocking_reasons,
+        }
+    }
 
 
 async def policy_node(state: AgentState) -> dict:
-    # Not "HUMAN_APPROVAL_REQUIRED" — no Approval row is created and nothing
-    # actually pauses here yet. The real risk-based policy engine (spec
-    # §11/ADR-004) is Phase 6; claiming an approval gate exists before one
-    # does would be exactly the kind of fake status this project forbids.
-    await _emit(
-        state,
-        from_agent="verification",
-        to_agent="policy",
-        message_type="POLICY_STEP_COMPLETED",
-    )
-    return {"final_decision": None, "status": "completed"}
+    verification_result = state["verification_result"] or {"overall_passed": False}
+    verification_passed = verification_result.get("overall_passed", False)
+
+    try:
+        diff = get_diff(state["repo_path"], _BASE_REF) if verification_passed else ""
+        changed = changed_files(state["repo_path"], _BASE_REF) if verification_passed else []
+    except Exception as exc:
+        await _emit_failure(
+            state,
+            from_agent="verification",
+            to_agent="policy",
+            message_type="POLICY_FAILED",
+            error=str(exc),
+        )
+        raise
+
+    risk = classify_risk(changed, diff) if verification_passed else "low"
+    decision = decide_policy(risk, verification_passed)
+
+    async with async_session_factory() as session:
+        if decision == "AUTO_APPROVED":
+            await RunRepository(session).update(state["run_id"], status="completed")
+        elif decision == "PENDING_HUMAN_APPROVAL":
+            await ApprovalRepository(session).create(
+                run_id=state["run_id"],
+                action=f"Merge changes for task {state['task_id']}",
+                risk_level=risk,
+                requested_reason=f"Risk classified as '{risk}' — requires human sign-off "
+                "before merge (spec §11).",
+            )
+            await RunRepository(session).update(state["run_id"], status="awaiting_approval")
+        else:
+            # BLOCKED_BY_VERIFICATION or BLOCKED_BY_POLICY: no approval path.
+            await RunRepository(session).update(state["run_id"], status="blocked")
+
+        await AgentMessageRepository(session).create(
+            run_id=state["run_id"],
+            task_id=state["task_id"],
+            from_agent="policy",
+            to_agent="orchestrator",
+            type="POLICY_DECIDED",
+            payload={"decision": decision, "risk_level": risk},
+        )
+        await session.commit()
+
+    return {"final_decision": decision, "status": "completed"}

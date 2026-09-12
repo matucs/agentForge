@@ -9,6 +9,7 @@ from app.api.schemas import (
     RunOut,
     SecurityFindingOut,
     TestResultOut,
+    VerificationResultOut,
 )
 from app.db.repositories import (
     AgentMessageRepository,
@@ -18,6 +19,7 @@ from app.db.repositories import (
     SecurityFindingRepository,
     TaskRepository,
     TestResultRepository,
+    VerificationResultRepository,
 )
 from app.db.session import get_session
 from app.orchestration.service import (
@@ -111,6 +113,17 @@ async def list_run_security_findings(
         raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
     findings = await SecurityFindingRepository(session).list_by_run(run_id)
     return [SecurityFindingOut.model_validate(f) for f in findings]
+
+
+@router.get("/{run_id}/verification-results", response_model=list[VerificationResultOut])
+async def list_run_verification_results(
+    run_id: str, session: AsyncSession = Depends(get_session)
+) -> list[VerificationResultOut]:
+    run = await RunRepository(session).get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    results = await VerificationResultRepository(session).list_by_run(run_id)
+    return [VerificationResultOut.model_validate(r) for r in results]
 
 
 @router.post("/{run_id}/start", response_model=RunOut, status_code=202)

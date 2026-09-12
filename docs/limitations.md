@@ -1,4 +1,4 @@
-# Limitations (current state, Phase 5)
+# Limitations (current state, Phase 6)
 
 This file exists so nothing in this repository is misrepresented. It is
 updated at the end of every phase.
@@ -89,27 +89,59 @@ updated at the end of every phase.
     a real temp git fixture repo once a key is configured — still
     `skipif`-guarded, not exercised in this environment yet (no key
     configured here).
+- **The deterministic Verification Gate is real** (`backend/app/verification/`):
+  `checks.py` actually runs `mypy`/`ruff` (or `tsc`/`eslint` for a Node/TS
+  repo) via subprocess — real tool execution, not a guess — and `gate.py`'s
+  `evaluate_gate` combines that with the Reviewer/QA/Security results
+  already in state under spec §10's fixed rules (typecheck failure, a
+  required test failure, a blocking security finding, or a high-severity
+  Reviewer finding each BLOCK; lint/low-severity issues are recorded but
+  never block). Every rule is unit-tested in isolation
+  (`tests/test_verification_gate.py`), and the subprocess runners are
+  tested against real temp repos with an actual mypy type error and an
+  actual ruff violation (`tests/test_verification_checks.py`) — confirmed
+  to correctly report both a genuine pass and a genuine failure. Results
+  persist as real `VerificationResult` rows
+  (`GET /api/runs/:id/verification-results`).
+- **The risk-based Policy engine is real** (`backend/app/policy/engine.py`,
+  ADR-004): `classify_risk` inspects the actual changed-file paths and diff
+  content (table-driven unit tests for every tier,
+  `tests/test_policy_engine.py`, including the critical/`DROP TABLE`
+  case), and `decide_policy` is enforced in `policy_node`, not merely
+  described — a real `Approval` row is created for a high-risk change
+  (`Run.status = "awaiting_approval"`), and `POST
+  /api/approvals/:id/approve|reject` (spec §22) are the only way to move
+  it forward, tested end to end against a directly-seeded pending approval
+  (`tests/test_approvals.py`) and confirmed live via a manual HTTP request
+  (`GET /api/approvals` → `POST .../approve` → real `approved` status +
+  the linked `Run` flipped to `completed`; a second approve attempt
+  correctly 409s).
+- **Scope decision, not an oversight**: Policy is the last graph node before
+  `END`, so "pausing for approval" does not interrupt/resume the LangGraph
+  execution — the graph finishes normally and `Run.status` is simply left
+  non-terminal-in-the-good-sense (`awaiting_approval`) until a human
+  decides. `service.py`'s post-graph status write was fixed to respect
+  whatever `policy_node` already set, rather than unconditionally
+  overwriting it with `"completed"` (see Bugs section).
 
 ## What does not exist yet
 
-- No deterministic verification gate or policy engine exists yet
-  (`backend/app/verification/`, `backend/app/policy/` are scaffolding only).
-  The `policy` node does not create an `Approval` row or pause the run.
-  Reviewer/Security findings are real and persisted, but nothing currently
-  *blocks* a run on them — a high-severity finding is visible via the API,
-  not enforced.
-- No GitHub PR creation (Phase 5's git operations are local-only: real
-  branches and commits, never a push or a remote API call), no
-  failure-injection demos, no evaluation harness, no observability pipeline
-  (OpenTelemetry/LangSmith), and no dashboard pages beyond the health panel
-  on `/`.
+- No GitHub PR creation on approval (Phase 5's git operations are
+  local-only: real branches and commits, never a push or a remote API
+  call), no failure-injection demos, no evaluation harness, no
+  observability pipeline (OpenTelemetry/LangSmith), and no dashboard pages
+  beyond the health panel on `/`.
 - No dependency/CVE vulnerability database check — Security is a static
-  pattern scan only (see Phase 5 trade-offs below).
+  pattern scan only (see Phase 5 trade-offs).
+- No Slack/n8n notification when a run reaches `awaiting_approval` — an
+  operator has to poll `GET /api/approvals` themselves; that integration is
+  Phase 11.
 - CI runs lint/type-check/tests for the real code that exists (including
-  the deterministic Developer/QA/Security/git_ops tests), but the full
-  agent pipeline's real-LLM path is not exercised in CI — no API key is
-  configured there, by design (never commit one), so that path only runs
-  wherever a developer has added their own key locally.
+  the deterministic verification/policy/Developer/QA/Security/git_ops
+  tests), but the full agent pipeline's real-LLM path is not exercised in
+  CI — no API key is configured there, by design (never commit one), so
+  that path only runs wherever a developer has added their own key
+  locally.
 
 ## Bugs found and fixed during development
 
@@ -138,6 +170,18 @@ updated at the end of every phase.
   the secondary sort key was a random UUID uncorrelated with insertion
   order. Fixed by adding a DB-generated monotonic `seq` (`BigInteger`,
   `Identity()`) column and ordering by it instead.
+- **`service.py` would have silently overwritten a real `blocked`/
+  `awaiting_approval` outcome with `"completed"` (Phase 6).** The
+  post-`graph.ainvoke` success path unconditionally wrote
+  `status="completed"` — harmless while `policy_node` was a placeholder
+  that never set anything else, but the moment `policy_node` became real
+  and started setting `blocked`/`awaiting_approval` itself, this line would
+  have clobbered it back to `completed` on every single run, making the
+  entire policy engine's enforcement invisible at the one place
+  (`GET /api/runs/:id`) everything else reads it from. Caught by inspection
+  while wiring `policy_node`, before it was exercised by a test — fixed by
+  reading the run's current status first and only defaulting to
+  `"completed"` if it's still `"running"`.
 
 ## Known trade-offs made in Phase 1
 
@@ -217,3 +261,25 @@ updated at the end of every phase.
   API key configured). CI's `ubuntu-latest` runner has `git` already but no
   configured identity, so the workflow now sets one before the test step —
   found by inspection while fixing the container, not by a CI failure.
+
+## Known trade-offs made in Phase 6
+
+- **`classify_risk`'s default tier for an unrecognized change is `medium`,
+  not `low`.** Spec §11's table doesn't define a fallback; erring toward
+  requiring at least Reviewer/QA/Security sign-off (which already happened
+  earlier in the pipeline) rather than silently auto-merging an
+  unclassified change seemed the safer default. Documented here rather than
+  left implicit.
+- **No literal LangGraph pause/resume.** As described above, "pausing for
+  human approval" is implemented as `Run.status = "awaiting_approval"` plus
+  a real `Approval` row, not as an interrupted/resumed graph execution —
+  because Policy is already the last node before `END`, there is nothing
+  downstream that would need to run later. If a future phase needs a risk
+  trigger *earlier* in the pipeline (e.g. pausing before Developer writes
+  files at all), that would need real interrupt/resume support this phase
+  does not add.
+- **Lint failures never block**, per a literal reading of spec §10's rule
+  table (only Typecheck/Security/Tests/Reviewer are listed as BLOCK
+  conditions). A stricter policy could treat lint as blocking too; this
+  system currently treats it as informational only, recorded in
+  `VerificationResult` but never in `blocking_reasons`.

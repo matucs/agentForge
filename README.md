@@ -17,10 +17,11 @@ before they reach the final result.
 
 This repository is being built incrementally, phase by phase (see
 [docs/limitations.md](docs/limitations.md) for exactly what exists today vs.
-what's planned). **Phases 1–5 — repository scaffold, backend domain
-services, the LangGraph orchestration skeleton, and all seven engineering
-agents — are complete.** The deterministic verification gate, the policy
-engine, and the dashboard UI are not implemented yet.
+what's planned). **Phases 1–6 — repository scaffold, backend domain
+services, the LangGraph orchestration skeleton, all seven engineering
+agents, the deterministic verification gate, and the risk-based policy
+engine — are complete.** Git PR automation, observability/evaluation
+pipelines, and the dashboard UI are not implemented yet.
 
 ### What works right now
 
@@ -86,6 +87,26 @@ engine, and the dashboard UI are not implemented yet.
     (still Phase 6) gate.
   - New endpoints: `GET /api/runs/:id/reviews`, `/test-results`,
     `/security-findings`.
+- **A real deterministic Verification Gate** (`backend/app/verification/`) —
+  the piece ADR-003 exists to justify. It runs its own real type-check/lint
+  subprocess (mypy/ruff or tsc/eslint, whichever applies) and combines that
+  with the Reviewer/QA/Security results already sitting in state, applying
+  spec §10's fixed rules: a failed type check, a required test failure, a
+  blocking security finding, or a high-severity Reviewer finding each BLOCK
+  the run — a lint issue or low-severity finding does not. No LLM call
+  anywhere in this module; the same inputs always produce the same
+  PASS/FAIL. New endpoint: `GET /api/runs/:id/verification-results`.
+- **A real risk-based Policy engine** (`backend/app/policy/engine.py`,
+  ADR-004) — classifies the actual changed files/diff (docs/tests/frontend
+  → low, dependency/API-shaped paths → medium, migration/deploy-config
+  paths → high, an unguarded `DROP TABLE`/`DELETE FROM` inside a migration
+  → critical) and enforces it in the backend: low/medium auto-merge
+  (`Run.status = "completed"`), high creates a real `Approval` row and
+  pauses the run (`Run.status = "awaiting_approval"`), critical or a failed
+  verification gate blocks outright (`Run.status = "blocked"`) with no
+  approval path at all. New endpoints: `GET /api/approvals`, `POST
+  /api/approvals/:id/approve|reject` (spec §22) — enforcement lives here,
+  not in whatever a client chooses to render.
 - A Next.js/TypeScript/Tailwind frontend that renders the *live* health
   response from the backend.
 - Docker Compose bringing up Postgres, Redis, backend, and frontend together
@@ -95,9 +116,7 @@ engine, and the dashboard UI are not implemented yet.
 
 ### What's not built yet
 
-The deterministic verification gate's actual pass/fail rules, the policy
-engine (Reviewer/Security findings are persisted and visible but nothing
-blocks a run yet), GitHub PR creation, observability/evaluation pipelines,
+GitHub PR creation on approval, observability/evaluation pipelines,
 the full dashboard, and failure-injection demos are all planned in later
 phases — see the roadmap below and [docs/limitations.md](docs/limitations.md).
 
@@ -171,8 +190,8 @@ npx tsc --noEmit && npm run build
 | 3 ✅ | LangGraph orchestration skeleton (graph, retries, checkpointing, timeout, cancellation) |
 | 4 ✅ | Planner / Architect / Researcher agents (real LLM calls, grounded research) |
 | 5 ✅ | Developer / Reviewer / QA / Security agents (real git commits, real test execution, real static scan) |
-| 6 | Deterministic verification gate + policy engine |
-| 7 | Git integration (branches, diffs, PRs) |
+| 6 ✅ | Deterministic verification gate + risk-based policy engine |
+| 7 | Git integration: GitHub PR creation (branch/commit already real since Phase 5) |
 | 8 | Observability + evaluation harness |
 | 9 | Frontend dashboard (runs, tasks, agents, approvals, operations) |
 | 10 | Failure-injection demos |

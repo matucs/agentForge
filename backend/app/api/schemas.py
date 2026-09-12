@@ -123,6 +123,35 @@ class SecurityFindingOut(BaseModel):
     created_at: datetime
 
 
+class VerificationResultOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    run_id: str
+    gate: str
+    passed: bool
+    detail: dict
+    created_at: datetime
+
+
+class ApprovalOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    run_id: str
+    action: str
+    risk_level: str
+    status: str
+    requested_reason: str | None
+    decided_by: str | None
+    decided_at: datetime | None
+    created_at: datetime
+
+
+class ApprovalDecision(BaseModel):
+    decided_by: str = "operator"
+
+
 class AgentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

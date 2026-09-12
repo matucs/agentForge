@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import (
     Agent,
     AgentMessage,
+    Approval,
     Artifact,
     Project,
     Review,
@@ -13,6 +14,7 @@ from app.db.models import (
     SecurityFinding,
     Task,
     TestResult,
+    VerificationResult,
 )
 
 
@@ -248,6 +250,70 @@ class SecurityFindingRepository:
             .order_by(SecurityFinding.created_at, SecurityFinding.id)
         )
         return list(result.scalars().all())
+
+
+class VerificationResultRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def create(
+        self, *, run_id: str, gate: str, passed: bool, detail: dict
+    ) -> VerificationResult:
+        result = VerificationResult(run_id=run_id, gate=gate, passed=passed, detail=detail)
+        self._session.add(result)
+        await self._session.flush()
+        return result
+
+    async def list_by_run(self, run_id: str) -> list[VerificationResult]:
+        result = await self._session.execute(
+            select(VerificationResult)
+            .where(VerificationResult.run_id == run_id)
+            .order_by(VerificationResult.created_at, VerificationResult.id)
+        )
+        return list(result.scalars().all())
+
+
+class ApprovalRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def create(
+        self,
+        *,
+        run_id: str,
+        action: str,
+        risk_level: str,
+        requested_reason: str | None = None,
+    ) -> Approval:
+        approval = Approval(
+            run_id=run_id,
+            action=action,
+            risk_level=risk_level,
+            status="pending",
+            requested_reason=requested_reason,
+        )
+        self._session.add(approval)
+        await self._session.flush()
+        return approval
+
+    async def get(self, approval_id: str) -> Approval | None:
+        return await self._session.get(Approval, approval_id)
+
+    async def list(self, *, status: str | None = None) -> list[Approval]:
+        stmt = select(Approval).order_by(Approval.created_at.desc())
+        if status is not None:
+            stmt = stmt.where(Approval.status == status)
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def update(self, approval_id: str, **fields: Any) -> Approval | None:
+        approval = await self._session.get(Approval, approval_id)
+        if approval is None:
+            return None
+        for key, value in fields.items():
+            setattr(approval, key, value)
+        await self._session.flush()
+        return approval
 
 
 class AgentRepository:

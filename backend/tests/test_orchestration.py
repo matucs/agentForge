@@ -113,7 +113,10 @@ async def test_run_executes_full_pipeline_with_live_llm(
     assert start_resp.status_code == 202
 
     run = await _poll_until_terminal(real_client, run_id, timeout=120.0)
-    assert run["status"] == "completed"
+    # Terminal status now depends on the real, deterministic verification
+    # gate and policy engine (Phase 6) — see the status assertion below,
+    # after the events/verification-results checks establish the pipeline
+    # actually ran all the way through.
 
     artifacts = (await real_client.get(f"/api/runs/{run_id}/artifacts")).json()
     artifact_types = [a["type"] for a in artifacts]
@@ -138,14 +141,28 @@ async def test_run_executes_full_pipeline_with_live_llm(
     events = (await real_client.get(f"/api/runs/{run_id}/events")).json()
     event_types = [e["type"] for e in events]
     assert event_types[:3] == ["PLAN_CREATED", "ARCHITECTURE_PROPOSED", "RESEARCH_RESULT"]
-    assert event_types[-1] == "POLICY_STEP_COMPLETED"
+    assert event_types[-1] == "POLICY_DECIDED"
     assert "IMPLEMENTATION_READY" in event_types
+    assert any(t in event_types for t in ("VERIFICATION_PASSED", "VERIFICATION_FAILED"))
 
     test_results = (await real_client.get(f"/api/runs/{run_id}/test-results")).json()
     assert len(test_results) >= 1
 
     security_findings_resp = await real_client.get(f"/api/runs/{run_id}/security-findings")
     assert security_findings_resp.status_code == 200  # real endpoint, even if list is empty
+
+    verification_results_resp = await real_client.get(
+        f"/api/runs/{run_id}/verification-results"
+    )
+    assert len(verification_results_resp.json()) >= 1
+
+    # This run's final status depends on the real risk classification of
+    # whatever the live LLM actually changed and whether verification
+    # passed — assert it's a real, recognized terminal state rather than
+    # hardcoding "completed" (a Reviewer/QA retry loop, or the model
+    # touching a path classify_risk treats as high-risk, are both
+    # legitimate real outcomes here).
+    assert run["status"] in {"completed", "awaiting_approval", "blocked"}
 
 
 @pytest.mark.asyncio
