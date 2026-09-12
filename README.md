@@ -17,10 +17,10 @@ before they reach the final result.
 
 This repository is being built incrementally, phase by phase (see
 [docs/limitations.md](docs/limitations.md) for exactly what exists today vs.
-what's planned). **Phases 1–4 — repository scaffold, backend domain
-services, the LangGraph orchestration skeleton, and the Planner/Architect/
-Researcher agents — are complete.** Developer/Reviewer/QA/Security, the
-verification gate, and the dashboard UI are not implemented yet.
+what's planned). **Phases 1–5 — repository scaffold, backend domain
+services, the LangGraph orchestration skeleton, and all seven engineering
+agents — are complete.** The deterministic verification gate, the policy
+engine, and the dashboard UI are not implemented yet.
 
 ### What works right now
 
@@ -63,21 +63,43 @@ verification gate, and the dashboard UI are not implemented yet.
   file that scan never actually saw is discarded, not trusted. If no
   provider is configured, the run fails cleanly with a real error message
   (no fallback plan) — verified for both cases.
-- Developer/Reviewer/QA/Security are still Phase 3 stub placeholders (no
-  LLM calls, no invented findings) — see
-  [docs/limitations.md](docs/limitations.md).
+- **Real Developer, Reviewer, QA, and Security agents** — the full agent
+  roster is now real:
+  - **Developer** (`app/agents/developer.py`) makes a real LLM call and
+    applies its output to an actual Git working tree: creates a real
+    `agentforge/task-<id>` branch (`backend/app/git_integration/git_ops.py`,
+    a thin real `git` CLI wrapper — no simulated repo state), writes files,
+    and commits for real. On a Reviewer/QA-triggered retry, it's given the
+    *specific* findings or failing test output that caused the retry, so it
+    attempts an actual fix rather than repeating itself.
+  - **Reviewer** makes a real LLM call over the actual `git diff` and
+    persists structured findings as real `Review` rows — these now drive
+    Phase 3's `route_after_reviewer` retry loop for the first time.
+  - **QA and Security are deliberately deterministic — no LLM.** QA detects
+    and actually executes the target repo's real test suite via subprocess
+    (`app/agents/qa.py`) and persists a real `TestResult` row, driving
+    `route_after_qa` for real. Security runs a real static pattern scan
+    (`app/agents/security_scan.py`: secret-shaped strings, `eval`/`exec`/
+    `shell=True`/`pickle.loads`) over the files Developer actually changed
+    and persists real `SecurityFinding` rows. This is the "verify" half of
+    the core principle showing up in the agents themselves, not only in the
+    (still Phase 6) gate.
+  - New endpoints: `GET /api/runs/:id/reviews`, `/test-results`,
+    `/security-findings`.
 - A Next.js/TypeScript/Tailwind frontend that renders the *live* health
   response from the backend.
-- Docker Compose bringing up Postgres, Redis, backend, and frontend together.
+- Docker Compose bringing up Postgres, Redis, backend, and frontend together
+  (the backend image includes a real `git` CLI + identity, needed by
+  Developer/Reviewer).
 - CI (GitHub Actions) running lint, type-check, and tests on every push.
 
 ### What's not built yet
 
-Developer/Reviewer/QA/Security agent reasoning, the deterministic
-verification gate's actual rules, the policy engine, Git branch/PR
-automation, observability/evaluation pipelines, the full dashboard, and
-failure-injection demos are all planned in later phases — see the roadmap
-below and [docs/limitations.md](docs/limitations.md).
+The deterministic verification gate's actual pass/fail rules, the policy
+engine (Reviewer/Security findings are persisted and visible but nothing
+blocks a run yet), GitHub PR creation, observability/evaluation pipelines,
+the full dashboard, and failure-injection demos are all planned in later
+phases — see the roadmap below and [docs/limitations.md](docs/limitations.md).
 
 ## Architecture
 
@@ -148,7 +170,7 @@ npx tsc --noEmit && npm run build
 | 2 ✅ | Backend domain services (projects/tasks/runs CRUD, repositories, agent registry) |
 | 3 ✅ | LangGraph orchestration skeleton (graph, retries, checkpointing, timeout, cancellation) |
 | 4 ✅ | Planner / Architect / Researcher agents (real LLM calls, grounded research) |
-| 5 | Developer / Reviewer / QA / Security agents |
+| 5 ✅ | Developer / Reviewer / QA / Security agents (real git commits, real test execution, real static scan) |
 | 6 | Deterministic verification gate + policy engine |
 | 7 | Git integration (branches, diffs, PRs) |
 | 8 | Observability + evaluation harness |

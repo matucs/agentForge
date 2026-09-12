@@ -20,3 +20,6 @@ frontend/.env.local
 # OS / editor
 .DS_Store
 *.swp
+
+# Claude Code local overrides (personal, not shared with the team)
+.claude/settings.local.json

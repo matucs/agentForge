@@ -3,7 +3,17 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Agent, AgentMessage, Artifact, Project, Run, Task
+from app.db.models import (
+    Agent,
+    AgentMessage,
+    Artifact,
+    Project,
+    Review,
+    Run,
+    SecurityFinding,
+    Task,
+    TestResult,
+)
 
 
 class ProjectRepository:
@@ -129,6 +139,113 @@ class ArtifactRepository:
             select(Artifact)
             .where(Artifact.run_id == run_id)
             .order_by(Artifact.created_at, Artifact.id)
+        )
+        return list(result.scalars().all())
+
+
+class ReviewRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def create(
+        self,
+        *,
+        run_id: str,
+        severity: str,
+        file: str | None,
+        line: int | None,
+        finding: str,
+        reason: str | None,
+        recommendation: str | None,
+    ) -> Review:
+        review = Review(
+            run_id=run_id,
+            severity=severity,
+            file=file,
+            line=line,
+            finding=finding,
+            reason=reason,
+            recommendation=recommendation,
+        )
+        self._session.add(review)
+        await self._session.flush()
+        return review
+
+    async def list_by_run(self, run_id: str) -> list[Review]:
+        result = await self._session.execute(
+            select(Review).where(Review.run_id == run_id).order_by(Review.created_at, Review.id)
+        )
+        return list(result.scalars().all())
+
+
+class TestResultRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def create(
+        self,
+        *,
+        run_id: str,
+        suite: str,
+        passed: bool,
+        total: int,
+        failed: int,
+        duration_seconds: float,
+        output: str | None,
+    ) -> TestResult:
+        test_result = TestResult(
+            run_id=run_id,
+            suite=suite,
+            passed=passed,
+            total=total,
+            failed=failed,
+            duration_seconds=duration_seconds,
+            output=output,
+        )
+        self._session.add(test_result)
+        await self._session.flush()
+        return test_result
+
+    async def list_by_run(self, run_id: str) -> list[TestResult]:
+        result = await self._session.execute(
+            select(TestResult)
+            .where(TestResult.run_id == run_id)
+            .order_by(TestResult.created_at, TestResult.id)
+        )
+        return list(result.scalars().all())
+
+
+class SecurityFindingRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def create(
+        self,
+        *,
+        run_id: str,
+        severity: str,
+        category: str,
+        file: str | None,
+        detail: str,
+        blocking: bool,
+    ) -> SecurityFinding:
+        finding = SecurityFinding(
+            run_id=run_id,
+            severity=severity,
+            category=category,
+            file=file,
+            detail=detail,
+            blocking=blocking,
+        )
+        self._session.add(finding)
+        await self._session.flush()
+        return finding
+
+    async def list_by_run(self, run_id: str) -> list[SecurityFinding]:
+        result = await self._session.execute(
+            select(SecurityFinding)
+            .where(SecurityFinding.run_id == run_id)
+            .order_by(SecurityFinding.created_at, SecurityFinding.id)
         )
         return list(result.scalars().all())
 

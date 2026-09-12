@@ -1,12 +1,23 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.schemas import AgentMessageOut, ArtifactOut, RunCreate, RunOut
+from app.api.schemas import (
+    AgentMessageOut,
+    ArtifactOut,
+    ReviewOut,
+    RunCreate,
+    RunOut,
+    SecurityFindingOut,
+    TestResultOut,
+)
 from app.db.repositories import (
     AgentMessageRepository,
     ArtifactRepository,
+    ReviewRepository,
     RunRepository,
+    SecurityFindingRepository,
     TaskRepository,
+    TestResultRepository,
 )
 from app.db.session import get_session
 from app.orchestration.service import (
@@ -67,6 +78,39 @@ async def list_run_artifacts(
         raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
     artifacts = await ArtifactRepository(session).list_by_run(run_id)
     return [ArtifactOut.model_validate(a) for a in artifacts]
+
+
+@router.get("/{run_id}/reviews", response_model=list[ReviewOut])
+async def list_run_reviews(
+    run_id: str, session: AsyncSession = Depends(get_session)
+) -> list[ReviewOut]:
+    run = await RunRepository(session).get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    reviews = await ReviewRepository(session).list_by_run(run_id)
+    return [ReviewOut.model_validate(r) for r in reviews]
+
+
+@router.get("/{run_id}/test-results", response_model=list[TestResultOut])
+async def list_run_test_results(
+    run_id: str, session: AsyncSession = Depends(get_session)
+) -> list[TestResultOut]:
+    run = await RunRepository(session).get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    results = await TestResultRepository(session).list_by_run(run_id)
+    return [TestResultOut.model_validate(r) for r in results]
+
+
+@router.get("/{run_id}/security-findings", response_model=list[SecurityFindingOut])
+async def list_run_security_findings(
+    run_id: str, session: AsyncSession = Depends(get_session)
+) -> list[SecurityFindingOut]:
+    run = await RunRepository(session).get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    findings = await SecurityFindingRepository(session).list_by_run(run_id)
+    return [SecurityFindingOut.model_validate(f) for f in findings]
 
 
 @router.post("/{run_id}/start", response_model=RunOut, status_code=202)

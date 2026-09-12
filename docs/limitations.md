@@ -1,4 +1,4 @@
-# Limitations (current state, Phase 4)
+# Limitations (current state, Phase 5)
 
 This file exists so nothing in this repository is misrepresented. It is
 updated at the end of every phase.
@@ -56,24 +56,60 @@ updated at the end of every phase.
 - Each of the three agents' structured output is persisted as a real
   `Artifact` row (`GET /api/runs/:id/artifacts`, new in this phase), linked
   from its `agent_messages` row via `artifact_id`.
+- **Developer, Reviewer, QA, and Security are real** (Phase 5):
+  - Developer (`backend/app/agents/developer.py`) makes a real LLM call,
+    then applies the result to a real Git working tree via
+    `backend/app/git_integration/git_ops.py` — a thin wrapper that shells
+    out to the actual `git` CLI (branch create/checkout, file writes,
+    commit, diff). `apply_developer_output` is unit-tested independent of
+    the LLM call with a hand-built `DeveloperOutput`
+    (`tests/test_developer_apply.py`), and `git_ops` itself is tested
+    against real temp git repositories (`tests/test_git_ops.py`) — every
+    assertion is against real `git` command output, nothing simulated.
+  - Reviewer makes a real LLM call over the actual `git diff` and persists
+    findings as real `Review` rows. `state["review_findings"]` now feeds
+    `routing.route_after_reviewer` (built in Phase 3, inert until now) with
+    real data for the first time.
+  - QA (`backend/app/agents/qa.py`) and Security
+    (`backend/app/agents/security_scan.py`) are **deterministic — no LLM
+    call at all**. QA detects and actually executes the target repo's test
+    command via subprocess (real `pytest`/`npm test`, real exit code,
+    real captured output — `tests/test_qa.py` proves both a genuinely
+    passing and a genuinely failing test suite are reported correctly).
+    Security runs a real regex-based scan for secret-shaped strings and
+    risky constructs (`eval`, `exec`, `shell=True`, `pickle.loads`) over the
+    files Developer actually changed (`tests/test_security_scan.py`).
+  - On a Reviewer/QA-triggered retry, Developer is given the specific
+    findings/failure output that caused it (`nodes._build_retry_feedback`,
+    unit-tested in `tests/test_developer_retry_feedback.py`) so it attempts
+    an actual fix, not a blind repeat.
+  - New endpoints: `GET /api/runs/:id/reviews`, `/test-results`,
+    `/security-findings`.
+  - The Phase 4 real-LLM integration test now runs the full pipeline against
+    a real temp git fixture repo once a key is configured — still
+    `skipif`-guarded, not exercised in this environment yet (no key
+    configured here).
 
 ## What does not exist yet
 
-- No Developer/Reviewer/QA/Security reasoning logic exists yet. Those four
-  orchestration nodes (`backend/app/orchestration/nodes.py`) still write one
-  honestly-labeled placeholder `agent_messages` row
-  (`payload.implemented = false`) and pass state through unchanged — no LLM
-  call, no invented finding or test result. Message `type` values for these
-  four stay deliberately neutral (`QA_STEP_COMPLETED`, not `TEST_PASSED`) so
-  nothing claims an outcome that was never computed.
 - No deterministic verification gate or policy engine exists yet
   (`backend/app/verification/`, `backend/app/policy/` are scaffolding only).
   The `policy` node does not create an `Approval` row or pause the run.
-- No Git integration, no PR creation, no failure-injection demos, no
-  evaluation harness, no observability pipeline (OpenTelemetry/LangSmith),
-  and no dashboard pages beyond the single health panel on `/`.
-- CI currently runs lint/type-check/tests for the scaffold that exists; it
-  does not yet exercise agent workflows because none exist.
+  Reviewer/Security findings are real and persisted, but nothing currently
+  *blocks* a run on them — a high-severity finding is visible via the API,
+  not enforced.
+- No GitHub PR creation (Phase 5's git operations are local-only: real
+  branches and commits, never a push or a remote API call), no
+  failure-injection demos, no evaluation harness, no observability pipeline
+  (OpenTelemetry/LangSmith), and no dashboard pages beyond the health panel
+  on `/`.
+- No dependency/CVE vulnerability database check — Security is a static
+  pattern scan only (see Phase 5 trade-offs below).
+- CI runs lint/type-check/tests for the real code that exists (including
+  the deterministic Developer/QA/Security/git_ops tests), but the full
+  agent pipeline's real-LLM path is not exercised in CI — no API key is
+  configured there, by design (never commit one), so that path only runs
+  wherever a developer has added their own key locally.
 
 ## Bugs found and fixed during development
 
@@ -144,7 +180,40 @@ updated at the end of every phase.
   and visible via the API, not yet wired into routing or a retry. That
   wiring is a natural fit for the Phase 6 policy engine, not built yet.
 - Real-provider integration tests exist
-  (`test_run_produces_real_plan_architecture_research_with_live_llm`) but
-  have not actually executed against a live model in this environment — no
-  API key has been configured here yet. They are `skipif`-guarded, not
-  deleted or faked, and will run automatically once a key is added.
+  (`test_run_executes_full_pipeline_with_live_llm`) but have not actually
+  executed against a live model in this environment — no API key has been
+  configured here yet. They are `skipif`-guarded, not deleted or faked, and
+  will run automatically once a key is added.
+
+## Known trade-offs made in Phase 5
+
+- **Full-file-content replacement, not diffs/patches.** Developer's LLM
+  output is a complete file body per changed path, not a unified diff. This
+  makes applying and unit-testing the result trivially deterministic
+  (`git_ops.write_files` + `commit_all`, no patch/merge logic to get wrong),
+  at the cost of being unable to make a surgical one-line change to a large
+  existing file without the model reproducing the whole thing. A real
+  diff/patch-based approach is a reasonable future improvement, not built
+  here.
+- **Security is a static pattern scan, not a dependency/CVE database
+  check.** It catches secret-shaped strings and a handful of risky
+  constructs (`eval`, `shell=True`, ...) via regex over changed files — real
+  and deterministic, but it does not check `requirements.txt`/`package.json`
+  against a vulnerability database (`pip-audit`, `npm audit`, or similar).
+  Deliberately out of scope to avoid a network dependency on an external
+  advisory service for this phase.
+- **The base branch is assumed to be named `main`.** `git_ops.ensure_branch`
+  checks out `main` before creating the task branch on first entry; if a
+  target repo's default branch has another name, Developer still works (it
+  falls back to branching from whatever is currently checked out) but the
+  "branch from the real default" behavior silently doesn't apply. Not
+  configurable yet.
+- **Backend container now requires `git`.** The Dockerfile installs it and
+  sets a container-local git identity (`agentforge@example.com`) — found
+  and fixed while verifying this phase in Docker (the base `python:3.11-
+  slim` image has no `git` binary at all, which would have made
+  Developer/Reviewer fail silently-to-the-user as an unhandled subprocess
+  error the first time someone actually ran this in a container with a real
+  API key configured). CI's `ubuntu-latest` runner has `git` already but no
+  configured identity, so the workflow now sets one before the test step —
+  found by inspection while fixing the container, not by a CI failure.

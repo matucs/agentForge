@@ -42,6 +42,13 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Configure git identity for Developer/Reviewer agent tests
+        # git_ops tests (and the Developer agent it backs) create real temp
+        # repos and commit into them — git needs a global identity to do that.
+        run: |
+          git config --global user.email "agentforge-ci@example.com"
+          git config --global user.name "AgentForge CI"
+
       - name: Install backend dependencies
         working-directory: backend
         run: pip install -e ".[dev]"

@@ -1,4 +1,5 @@
 import asyncio
+import subprocess
 
 import httpx
 import pytest
@@ -6,11 +7,13 @@ import pytest
 from app.config import get_settings
 
 
-async def _create_project_task_run(client: httpx.AsyncClient) -> tuple[str, str, str]:
+async def _create_project_task_run(
+    client: httpx.AsyncClient, *, repo_path: str = "/repo"
+) -> tuple[str, str, str]:
     project = (
         await client.post(
             "/api/projects",
-            json={"name": "AgentForge", "repo_path": "/repo", "description": None},
+            json={"name": "AgentForge", "repo_path": repo_path, "description": None},
         )
     ).json()
     task = (
@@ -72,43 +75,77 @@ async def test_run_fails_cleanly_when_no_llm_provider_configured(
     assert artifacts == []  # no plan artifact — the agent never produced one
 
 
+def _init_fixture_repo(tmp_path) -> str:
+    """A tiny real git repo with a Python package and a passing test, so
+    Developer has something to branch from and QA has a real test suite to
+    execute against."""
+    repo_path = str(tmp_path)
+    subprocess.run(["git", "init", "-q"], cwd=repo_path, check=True)
+    subprocess.run(["git", "checkout", "-q", "-b", "main"], cwd=repo_path, check=True)
+    (tmp_path / "app.py").write_text("def add(a, b):\n    return a + b\n")
+    (tmp_path / "test_app.py").write_text(
+        "from app import add\n\ndef test_add():\n    assert add(1, 2) == 3\n"
+    )
+    subprocess.run(["git", "add", "-A"], cwd=repo_path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "initial commit"], cwd=repo_path, check=True)
+    return repo_path
+
+
 @pytest.mark.asyncio
 @pytest.mark.skipif(
     not _has_real_llm_credentials(),
     reason="requires a real ANTHROPIC_API_KEY or OPENAI_API_KEY in backend/.env",
 )
-async def test_run_produces_real_plan_architecture_research_with_live_llm(
-    real_client: httpx.AsyncClient,
+async def test_run_executes_full_pipeline_with_live_llm(
+    real_client: httpx.AsyncClient, tmp_path
 ) -> None:
     """Only runs when a real provider is configured. Exercises actual LLM
-    calls end to end for Planner/Architect/Researcher; Developer onward are
-    still Phase 3 stubs, so the run still completes structurally."""
-    _, _, run_id = await _create_project_task_run(real_client)
+    calls for Planner/Architect/Researcher/Developer/Reviewer against a real
+    temp git repo, and real subprocess test execution + static security scan
+    for QA/Security. Loose on exact event sequence/iteration count since
+    real LLM output can trigger a genuine Reviewer/QA retry loop — that's a
+    feature (Phase 3's routing actually firing), not something to pin down
+    to one exact path."""
+    repo_path = _init_fixture_repo(tmp_path)
+    _, _, run_id = await _create_project_task_run(real_client, repo_path=repo_path)
 
     start_resp = await real_client.post(f"/api/runs/{run_id}/start")
     assert start_resp.status_code == 202
 
-    run = await _poll_until_terminal(real_client, run_id, timeout=60.0)
+    run = await _poll_until_terminal(real_client, run_id, timeout=120.0)
     assert run["status"] == "completed"
 
     artifacts = (await real_client.get(f"/api/runs/{run_id}/artifacts")).json()
-    artifacts_by_type = {a["type"]: a for a in artifacts}
-    assert set(artifacts_by_type) == {"plan", "architecture", "research"}
-    assert artifacts_by_type["plan"]["content"]["subtasks"]
+    artifact_types = [a["type"] for a in artifacts]
+    assert "plan" in artifact_types
+    assert "architecture" in artifact_types
+    assert "research" in artifact_types
+    assert "implementation" in artifact_types
+
+    implementation = next(a for a in artifacts if a["type"] == "implementation")
+    assert implementation["content"]["commit_sha"]
+    assert len(implementation["content"]["commit_sha"]) == 40
+
+    branch_output = subprocess.run(
+        ["git", "branch", "--list", implementation["content"]["branch"]],
+        cwd=repo_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert implementation["content"]["branch"] in branch_output.stdout
 
     events = (await real_client.get(f"/api/runs/{run_id}/events")).json()
     event_types = [e["type"] for e in events]
-    assert event_types == [
-        "PLAN_CREATED",
-        "ARCHITECTURE_PROPOSED",
-        "RESEARCH_RESULT",
-        "DEVELOPER_STEP_COMPLETED",
-        "REVIEWER_STEP_COMPLETED",
-        "QA_STEP_COMPLETED",
-        "SECURITY_STEP_COMPLETED",
-        "VERIFICATION_STEP_COMPLETED",
-        "POLICY_STEP_COMPLETED",
-    ]
+    assert event_types[:3] == ["PLAN_CREATED", "ARCHITECTURE_PROPOSED", "RESEARCH_RESULT"]
+    assert event_types[-1] == "POLICY_STEP_COMPLETED"
+    assert "IMPLEMENTATION_READY" in event_types
+
+    test_results = (await real_client.get(f"/api/runs/{run_id}/test-results")).json()
+    assert len(test_results) >= 1
+
+    security_findings_resp = await real_client.get(f"/api/runs/{run_id}/security-findings")
+    assert security_findings_resp.status_code == 200  # real endpoint, even if list is empty
 
 
 @pytest.mark.asyncio

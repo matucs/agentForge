@@ -37,3 +37,30 @@ class ResearchFinding(BaseModel):
 
 class ResearchOutput(BaseModel):
     findings: list[ResearchFinding] = Field(default_factory=list)
+
+
+class DeveloperFile(BaseModel):
+    path: str
+    content: str
+
+
+class DeveloperOutput(BaseModel):
+    # Full-file-content replacement, not a diff/patch — a deliberate Phase 5
+    # scope line (see docs/limitations.md): simpler to apply deterministically
+    # and to unit-test independent of the LLM call.
+    files: list[DeveloperFile] = Field(default_factory=list)
+    test_files: list[DeveloperFile] = Field(default_factory=list)
+    summary: str = ""
+
+
+class ReviewFinding(BaseModel):
+    severity: str  # "low" | "medium" | "high"
+    file: str
+    line: int | None = None
+    finding: str
+    reason: str
+    recommendation: str
+
+
+class ReviewOutput(BaseModel):
+    findings: list[ReviewFinding] = Field(default_factory=list)

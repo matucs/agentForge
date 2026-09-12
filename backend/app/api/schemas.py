@@ -81,6 +81,48 @@ class ArtifactOut(BaseModel):
     created_at: datetime
 
 
+class ReviewOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    run_id: str
+    severity: str
+    file: str | None
+    line: int | None
+    finding: str
+    reason: str | None
+    recommendation: str | None
+    resolved: bool
+    created_at: datetime
+
+
+class TestResultOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    run_id: str
+    suite: str
+    passed: bool
+    total: int
+    failed: int
+    duration_seconds: float
+    output: str | None
+    created_at: datetime
+
+
+class SecurityFindingOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    run_id: str
+    severity: str
+    category: str
+    file: str | None
+    detail: str
+    blocking: bool
+    created_at: datetime
+
+
 class AgentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
