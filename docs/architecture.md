@@ -61,29 +61,46 @@ approval) are deterministic code paths that make the final pass/fail call.
                      Merge            Human Approval
 ```
 
-## Implementation status (Phase 1)
+## Implementation status (Phase 11 complete; see roadmap)
 
-Implemented:
+Every box in the diagram above is a real, working implementation as of
+Phase 11 — not a placeholder. In brief (each linked doc has the full
+detail, including exactly how it was verified):
 
 - **Shared Project State** — Postgres, via SQLAlchemy models + Alembic
-  migrations (`backend/app/db/models.py`). Every entity called out in the
-  spec (projects, tasks, runs, agents, agent_messages, artifacts, decisions,
-  reviews, test_results, security_findings, verification_results, approvals,
-  evaluations, evaluation_runs, tool_calls, audit_events) is a normalized
-  table, not a JSON blob.
-- **LLM provider abstraction** (`backend/app/llm/`) — `LLMProvider` ABC with
-  real `AnthropicProvider` and `OpenAIProvider` implementations, selected by
-  `DEFAULT_LLM_PROVIDER`. Cost is computed from each response's actual
-  reported token usage against published per-model pricing, not estimated.
-- **Web UI/API substrate** — FastAPI app (`backend/app/main.py`) with a real
-  `/api/health` check, and a Next.js frontend that renders it live.
+  migrations (`backend/app/db/models.py`). Every entity in the diagram
+  (projects, tasks, runs, agents, agent_messages, artifacts, reviews,
+  test_results, security_findings, verification_results, approvals,
+  evaluations, evaluation_runs, tool_calls) is a normalized table.
+- **Orchestrator** — a real LangGraph `StateGraph` with conditional
+  retry edges and Postgres checkpointing. See
+  [orchestration.md](orchestration.md).
+- **Planner/Architect/Researcher/Developer/Reviewer** — real LLM calls
+  through a provider-agnostic `LLMProvider` abstraction (Anthropic/OpenAI),
+  real git commits for Developer. **QA/Security** — real `pytest`/static-
+  scan subprocess execution, no LLM. See [agent-model.md](agent-model.md).
+- **Verification Gate + Policy Engine** — deterministic, no LLM anywhere in
+  either module; this is the piece the whole project's core principle
+  rests on. See [verification.md](verification.md) and
+  [security.md](security.md).
+- **Git/GitHub integration** — real branch/commit/diff operations, real
+  GitHub PR creation via the REST API (credential-gated).
+- **Observability** — real structured logs, OpenTelemetry spans, and
+  live-computed Prometheus metrics. See [observability.md](observability.md).
+- **Evaluation harness** — real pipeline runs against disposable fixture
+  repos. See [evaluation.md](evaluation.md).
+- **Frontend dashboard** — Next.js pages, all fetching the live backend,
+  no mock data.
+- **Failure-injection demos** (`make demo-failure`) — real proof that the
+  deterministic gate overrides an incorrect simulated approval.
+- **n8n/Slack integration** — real inbound webhook, real outbound
+  notifications. See [integrations.md](integrations.md).
 
-Not yet implemented (see roadmap in [README.md](../README.md)):
-
-- Orchestrator (LangGraph graph), the seven agents' actual reasoning/tool use,
-  the Verification Gate's rule engine, the Policy Gate, Git branch/PR
-  automation, engineering memory, observability pipelines, and the dashboard
-  UI beyond the health panel.
+What's explicitly not built, and why, is tracked continuously in
+[limitations.md](limitations.md) rather than here — that file is the
+single source of truth for "what's real right now" and is updated at the
+end of every phase, so it never goes stale the way a status section in
+this file would.
 
 ## Why these technology choices
 

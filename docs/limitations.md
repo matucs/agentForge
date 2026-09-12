@@ -1,4 +1,4 @@
-# Limitations (current state, Phase 11)
+# Limitations (current state, Phase 12 — final)
 
 This file exists so nothing in this repository is misrepresented. It is
 updated at the end of every phase.
@@ -566,3 +566,35 @@ updated at the end of every phase.
   validation at creation time) — the same trade-off Phase 9's "new task"
   form already makes for `repo_path`, extended here rather than
   re-litigated.
+
+## Known trade-offs made in Phase 12
+
+- **The remaining subsystem docs** (`agent-model.md`, `orchestration.md`,
+  `verification.md`, `security.md`, `observability.md`, `evaluation.md`,
+  `operations.md`, `final-report.md`) were written by reading the current
+  source directly (not from the original planning conversation, which had
+  scrolled out of context by this phase) — every claim in them was checked
+  against the actual file it describes as this phase was written, and the
+  security dogfooding claim (`security_scan.scan_files` run against every
+  `.py` file under `backend/app/`, finding only the deliberate Scenario 3
+  demo secret) was re-run live in this environment, not carried over from
+  an earlier phase's memory of running it.
+- **This is the final planned phase.** Any further work (a real CVE scan,
+  webhook auth, a Playwright suite, an actual cloud deployment) is future
+  work, not partially started and left incomplete here — see this file's
+  "What does not exist yet" section, which is exhaustive as of this
+  commit.
+
+## Final verification (Phase 12)
+
+Run in this environment as the last step before the final commit:
+`ruff check app tests` and `mypy app` clean (67 source files); `pytest -q`
+green three consecutive times (143 passed, 1 skipped — the skip being the
+real-credentials-gated orchestration test); `npx tsc --noEmit` and
+`npm run build` clean for the frontend; `docker compose up -d --build`
+brought up Postgres/Redis/backend/frontend together, `alembic upgrade
+head` applied cleanly, `/api/health` reported real DB/Redis connectivity,
+and every dashboard route (`/`, `/runs`, `/tasks`, `/agents`,
+`/operations`, `/approvals`, `/evaluations`) returned a real `200` against
+the live containerized backend before the stack was torn down
+(`docker compose down`, confirmed no leftover containers).

@@ -15,13 +15,15 @@ before they reach the final result.
 
 ## Status
 
-This repository is being built incrementally, phase by phase (see
-[docs/limitations.md](docs/limitations.md) for exactly what exists today vs.
-what's planned). **Phases 1–9 — repository scaffold, backend domain
-services, the LangGraph orchestration skeleton, all seven engineering
-agents, the deterministic verification gate, the risk-based policy engine,
-GitHub PR creation, observability/evaluation, and the frontend dashboard —
-are complete.**
+This repository was built incrementally, phase by phase (see
+[docs/limitations.md](docs/limitations.md) for exactly what exists vs. what
+was deliberately left out, and [docs/final-report.md](docs/final-report.md)
+for the full engineering summary). **All 12 planned phases are complete:**
+repository scaffold, backend domain services, the LangGraph orchestration
+skeleton, all seven engineering agents, the deterministic verification
+gate, the risk-based policy engine, GitHub PR creation, observability/
+evaluation, the frontend dashboard, failure-injection demos, n8n/Slack
+integration, and a final hardening/documentation pass.
 
 ### What works right now
 
@@ -203,10 +205,22 @@ are complete.**
   line), then restarted with a webhook URL pointed at a throwaway local
   HTTP server and confirmed the exact event JSON arrived there for real.
 
-### What's not built yet
+- Docs for every major subsystem: [docs/agent-model.md](docs/agent-model.md),
+  [docs/orchestration.md](docs/orchestration.md),
+  [docs/verification.md](docs/verification.md),
+  [docs/security.md](docs/security.md),
+  [docs/observability.md](docs/observability.md),
+  [docs/evaluation.md](docs/evaluation.md),
+  [docs/operations.md](docs/operations.md),
+  [docs/integrations.md](docs/integrations.md), and a full
+  [docs/final-report.md](docs/final-report.md).
 
-Further hardening (Phase 12) is the only remaining planned phase — see the
-roadmap below and [docs/limitations.md](docs/limitations.md).
+### What's not built (by design, documented rather than hidden)
+
+See [docs/limitations.md](docs/limitations.md) for the complete,
+continuously-updated list — dependency/CVE vulnerability scanning, webhook
+signature verification, outbound webhook retry, an automated frontend test
+suite, and a real cloud deployment target are the main ones.
 
 ## Architecture
 
@@ -284,7 +298,7 @@ npx tsc --noEmit && npm run build
 | 9 ✅ | Frontend dashboard (runs, tasks, agents, approvals, operations, evaluations) |
 | 10 ✅ | Failure-injection demos (`make demo-failure`, `make demo`) |
 | 11 ✅ | n8n / Slack integration (`POST /api/webhooks/n8n`, outbound notifications) |
-| 12 | Hardening, full test suite, deployment docs |
+| 12 ✅ | Hardening, remaining docs, security dogfooding, final verification pass |
 
 ## License
 
