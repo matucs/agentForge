@@ -1,4 +1,4 @@
-# Limitations (current state, Phase 8)
+# Limitations (current state, Phase 9)
 
 This file exists so nothing in this repository is misrepresented. It is
 updated at the end of every phase.
@@ -187,11 +187,28 @@ updated at the end of every phase.
   etc. stay `None`) rather than invented — computing it honestly needs a
   task with a *known* injected bug to check detection against, which is
   Phase 10's failure-injection harness, not built yet.
+- **The full frontend dashboard is real** (`frontend/src/app/`): every page
+  is a client component fetching from the live backend — `/`, `/runs`,
+  `/runs/[id]`, `/tasks`, `/tasks/[id]`, `/agents`, `/evaluations`,
+  `/operations`, `/approvals`. Two small new endpoints back the parts that
+  had no JSON-shaped equivalent yet: `GET /api/evaluations` and
+  `/api/evaluations/:id/runs` (real aggregates computed from `EvaluationRun`
+  rows, tested in `tests/test_evaluations_api.py`), and
+  `GET /api/operations/summary` (the same real DB queries
+  `app/observability/metrics.py` already used for Prometheus, reshaped to
+  JSON — `tests/test_operations_api.py`). Verified: `next build` and
+  `tsc --noEmit` both clean; the full stack brought up in Docker (backend +
+  frontend + Postgres + Redis) and every page hit for a real 200; a real
+  task/run created via the API and its detail page confirmed reachable;
+  CORS confirmed working for the frontend origin against the real backend.
+  The "new task" form on `/tasks` calls the same
+  `POST /api/projects`/`/api/tasks`/`/api/runs` +
+  `POST /api/runs/:id/start` sequence the backend's own tests use — no
+  separate "demo" code path.
 
 ## What does not exist yet
 
-- No failure-injection demos yet, and no dashboard pages beyond the health
-  panel on `/`.
+- No failure-injection demos yet.
 - No dependency/CVE vulnerability database check — Security is a static
   pattern scan only (see Phase 5 trade-offs).
 - No Slack/n8n notification when a run reaches `awaiting_approval` — an
@@ -431,3 +448,25 @@ updated at the end of every phase.
   (`run_to_completion`, not the API's fire-and-forget `start_run`). Simple
   and correct; slower than running the 5 tasks concurrently, which would
   be a reasonable future optimization once evaluation sets grow larger.
+
+## Known trade-offs made in Phase 9
+
+- **No automated frontend tests.** Verification is `tsc --noEmit` +
+  `next build` (both clean) plus manual checks against the real running
+  backend (every page hit for a real 200 in Docker, a real task/run's
+  detail page confirmed reachable, CORS confirmed). No component/e2e test
+  suite (e.g. Playwright) was added — a reasonable next step, not claimed
+  as done here.
+- **The "new project" form's repo path is a path on the backend host, not
+  something the browser can validate or browse to.** This mirrors how
+  `Project.repo_path` already works everywhere else in the system (the
+  agents operate on a real server-side git working tree); the form's
+  placeholder text says so, but there's no server-side existence check at
+  creation time — an invalid path only surfaces once a run actually tries
+  to use it (Developer/QA/Security would fail for real, not silently).
+- **The run detail page polls every 2 seconds while a run is active**, and
+  the overview/operations pages poll every 5 seconds unconditionally. Simple
+  and correct at this project's scale; a production deployment would more
+  likely use the already-real Redis pub/sub or a WebSocket rather than
+  polling — not built here, since polling is sufficient to demonstrate the
+  real data flow honestly.

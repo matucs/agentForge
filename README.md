@@ -17,11 +17,11 @@ before they reach the final result.
 
 This repository is being built incrementally, phase by phase (see
 [docs/limitations.md](docs/limitations.md) for exactly what exists today vs.
-what's planned). **Phases 1–8 — repository scaffold, backend domain
+what's planned). **Phases 1–9 — repository scaffold, backend domain
 services, the LangGraph orchestration skeleton, all seven engineering
 agents, the deterministic verification gate, the risk-based policy engine,
-GitHub PR creation, and observability/evaluation — are complete.** The
-dashboard UI is not implemented yet.
+GitHub PR creation, observability/evaluation, and the frontend dashboard —
+are complete.**
 
 ### What works right now
 
@@ -147,8 +147,27 @@ dashboard UI is not implemented yet.
   fabricated report. Reviewer/QA/Security "detection rate" is honestly
   reported as not-yet-measurable rather than invented, since computing it
   for real needs the Phase 10 failure-injection harness.
-- A Next.js/TypeScript/Tailwind frontend that renders the *live* health
-  response from the backend.
+- **A real Next.js/TypeScript/Tailwind dashboard** (`frontend/src/app/`) —
+  every page fetches from the real backend, no mock data anywhere:
+  - `/` — overview: live success rate/duration/cost from
+    `/api/operations/summary` and recent runs.
+  - `/runs`, `/runs/[id]` — filterable run list and a full trace (agent
+    timeline, artifacts, reviews, test results, security findings,
+    verification gate results, tool-call durations) with live Start/Cancel
+    actions, polling while a run is active.
+  - `/tasks`, `/tasks/[id]` — task list with a real "new task" form
+    (creates a project/task/run and starts it through the real API, the
+    same path the backend's own tests use) and per-task run history.
+  - `/agents` — the seeded registry (role/responsibilities/tools).
+  - `/evaluations` — real `make eval` results; honestly empty until one has
+    been run.
+  - `/operations` — the spec §17 dashboard, live from
+    `/api/operations/summary`.
+  - `/approvals` — the real pending-approval queue with working
+    Approve/Reject buttons.
+  - Two small new JSON endpoints back this: `GET /api/evaluations(/:id/runs)`
+    and `GET /api/operations/summary` (the same real DB queries
+    `/api/metrics` already uses, reshaped for the UI).
 - Docker Compose bringing up Postgres, Redis, backend, and frontend together
   (the backend image includes a real `git` CLI + identity, needed by
   Developer/Reviewer).
@@ -156,8 +175,9 @@ dashboard UI is not implemented yet.
 
 ### What's not built yet
 
-The full dashboard UI and failure-injection demos are planned in later
-phases — see the roadmap below and [docs/limitations.md](docs/limitations.md).
+Failure-injection demos, n8n/Slack integration, and further hardening are
+planned in later phases — see the roadmap below and
+[docs/limitations.md](docs/limitations.md).
 
 ## Architecture
 
@@ -232,7 +252,7 @@ npx tsc --noEmit && npm run build
 | 6 ✅ | Deterministic verification gate + risk-based policy engine |
 | 7 ✅ | Git integration: real GitHub PR creation (push + REST API) |
 | 8 ✅ | Observability (structured logs, metrics, tracing, real cost/budget tracking) + evaluation harness |
-| 9 | Frontend dashboard (runs, tasks, agents, approvals, operations) |
+| 9 ✅ | Frontend dashboard (runs, tasks, agents, approvals, operations, evaluations) |
 | 10 | Failure-injection demos |
 | 11 | n8n / Slack integration |
 | 12 | Hardening, full test suite, deployment docs |

@@ -394,6 +394,9 @@ class EvaluationRepository:
         result = await self._session.execute(select(Evaluation).order_by(Evaluation.name))
         return list(result.scalars().all())
 
+    async def get(self, evaluation_id: str) -> Evaluation | None:
+        return await self._session.get(Evaluation, evaluation_id)
+
 
 class EvaluationRunRepository:
     def __init__(self, session: AsyncSession) -> None:

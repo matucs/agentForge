@@ -4,11 +4,23 @@ never a stale in-memory counter that could drift from the actual database
 state. No fabricated numbers (spec §35).
 """
 
+from datetime import UTC, datetime
+
 from prometheus_client import CollectorRegistry, Gauge, generate_latest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Approval, Run, ToolCall, VerificationResult
+
+_TERMINAL_STATUSES = (
+    "completed",
+    "failed",
+    "cancelled",
+    "stopped_by_timeout",
+    "stopped_by_budget",
+    "blocked",
+    "rejected",
+)
 
 _RUN_STATUSES = (
     "pending",
@@ -115,3 +127,76 @@ async def render_metrics(session: AsyncSession) -> bytes:
         agent_errors.labels(agent=agent_name).set(error_count)
 
     return generate_latest(registry)
+
+
+async def compute_operations_summary(session: AsyncSession) -> dict:
+    """The JSON equivalent of render_metrics, shaped for the /operations
+    dashboard (spec §17) rather than Prometheus scraping. Same underlying
+    real queries — nothing here is estimated or invented."""
+    runs_total = (await session.execute(select(func.count()).select_from(Run))).scalar_one()
+
+    today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    runs_today = (
+        await session.execute(
+            select(func.count()).select_from(Run).where(Run.created_at >= today_start)
+        )
+    ).scalar_one()
+
+    runs_by_status = {}
+    for status in _RUN_STATUSES:
+        count = (
+            await session.execute(
+                select(func.count()).select_from(Run).where(Run.status == status)
+            )
+        ).scalar_one()
+        runs_by_status[status] = count
+
+    terminal_total = sum(runs_by_status[s] for s in _TERMINAL_STATUSES)
+    success_rate = runs_by_status["completed"] / terminal_total if terminal_total else None
+
+    duration_row = (
+        await session.execute(
+            select(
+                func.avg(
+                    func.extract("epoch", Run.finished_at) - func.extract("epoch", Run.started_at)
+                )
+            ).where(Run.started_at.is_not(None), Run.finished_at.is_not(None))
+        )
+    ).scalar_one()
+    avg_duration_seconds = float(duration_row) if duration_row is not None else None
+
+    cost_row = (
+        await session.execute(
+            select(func.avg(Run.estimated_cost_usd)).where(Run.status.in_(_TERMINAL_STATUSES))
+        )
+    ).scalar_one()
+    avg_estimated_cost_usd = float(cost_row) if cost_row is not None else None
+
+    verification_failure_count = (
+        await session.execute(
+            select(func.count())
+            .select_from(VerificationResult)
+            .where(VerificationResult.passed.is_(False))
+        )
+    ).scalar_one()
+
+    approvals_total = (
+        await session.execute(select(func.count()).select_from(Approval))
+    ).scalar_one()
+    approvals_pending = (
+        await session.execute(
+            select(func.count()).select_from(Approval).where(Approval.status == "pending")
+        )
+    ).scalar_one()
+
+    return {
+        "runs_total": runs_total,
+        "runs_today": runs_today,
+        "success_rate": success_rate,
+        "avg_duration_seconds": avg_duration_seconds,
+        "avg_estimated_cost_usd": avg_estimated_cost_usd,
+        "verification_failures": verification_failure_count,
+        "human_approvals_pending": approvals_pending,
+        "human_approvals_total": approvals_total,
+        "runs_by_status": runs_by_status,
+    }

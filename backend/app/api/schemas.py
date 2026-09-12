@@ -165,6 +165,49 @@ class ApprovalDecision(BaseModel):
     decided_by: str = "operator"
 
 
+class EvaluationRunOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    evaluation_id: str
+    run_id: str | None
+    success: bool
+    reviewer_correct: bool | None
+    qa_detected: bool | None
+    security_detected: bool | None
+    duration_seconds: float
+    estimated_cost_usd: float
+    created_at: datetime
+
+
+class EvaluationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    task_file: str
+    description: str | None
+    created_at: datetime
+    # Real aggregates computed from this evaluation's EvaluationRun rows —
+    # 0/None when none exist yet, never invented.
+    run_count: int
+    success_count: int
+    avg_duration_seconds: float | None
+    avg_estimated_cost_usd: float | None
+
+
+class OperationsSummary(BaseModel):
+    runs_total: int
+    runs_today: int
+    success_rate: float | None
+    avg_duration_seconds: float | None
+    avg_estimated_cost_usd: float | None
+    verification_failures: int
+    human_approvals_pending: int
+    human_approvals_total: int
+    runs_by_status: dict[str, int]
+
+
 class AgentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
