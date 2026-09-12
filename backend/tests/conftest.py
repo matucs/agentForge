@@ -59,6 +59,13 @@ async def real_client() -> AsyncIterator[httpx.AsyncClient]:
 
     async with engine.begin() as conn:
         await conn.execute(text("DELETE FROM agent_messages"))
+        await conn.execute(text("DELETE FROM tool_calls"))
+        await conn.execute(text("DELETE FROM verification_results"))
+        await conn.execute(text("DELETE FROM approvals"))
+        await conn.execute(text("DELETE FROM artifacts"))
+        await conn.execute(text("DELETE FROM reviews"))
+        await conn.execute(text("DELETE FROM test_results"))
+        await conn.execute(text("DELETE FROM security_findings"))
         await conn.execute(text("DELETE FROM runs"))
         await conn.execute(text("DELETE FROM tasks"))
         await conn.execute(text("DELETE FROM projects"))

@@ -1,0 +1,20 @@
+name: api-validation
+requirement: >
+  The "create order" endpoint currently accepts any JSON body without
+  validation. Add real input validation: required fields, correct types,
+  and sane bounds (e.g. positive quantity).
+expected_behavior: >
+  A request missing a required field, with a wrong type, or with an
+  out-of-bounds value (e.g. negative quantity) is rejected with a clear
+  4xx error and no partial write; a well-formed request still succeeds.
+acceptance_criteria:
+  - Missing a required field returns a 4xx with a message naming the
+    field, not a 500.
+  - A negative or zero quantity is rejected.
+  - A valid, well-formed request is unaffected and still creates the
+    order.
+known_failure_modes:
+  - Validating types but not bounds (e.g. allowing quantity=-5).
+  - Validation that runs after the record is already partially written.
+  - An overly broad except clause turning a validation error into a
+    generic 500.

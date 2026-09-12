@@ -1,0 +1,21 @@
+name: websocket-reconnect
+requirement: >
+  The client's WebSocket connection should automatically reconnect with
+  backoff after an unexpected disconnect, and resume receiving events
+  without the caller having to notice the drop.
+expected_behavior: >
+  On disconnect, the client retries with increasing backoff (capped), and
+  once reconnected, re-subscribes to whatever channel/state it had before
+  so no permanent gap in event delivery occurs.
+acceptance_criteria:
+  - A simulated disconnect triggers a reconnect attempt, not a permanent
+    failure state.
+  - Backoff between attempts increases and is capped, not immediate
+    infinite retries.
+  - After reconnecting, prior subscriptions are re-established.
+known_failure_modes:
+  - Reconnecting but never re-subscribing, silently dropping all further
+    events.
+  - Unbounded immediate retry loops that hammer the server.
+  - Race condition where a message sent during the reconnect window is
+    lost rather than queued or retried.

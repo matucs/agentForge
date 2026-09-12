@@ -1,0 +1,19 @@
+name: database-index
+requirement: >
+  Queries filtering orders by customer_id are slow on a large orders
+  table. Add an appropriate index and confirm the query plan actually uses
+  it.
+expected_behavior: >
+  A new index on the filtered column exists after the migration, and the
+  slow query's plan uses an index scan instead of a full table scan.
+acceptance_criteria:
+  - A migration adds an index on orders.customer_id (or a compound index
+    that covers it as a leading column).
+  - The migration is reversible (a real downgrade, not a no-op).
+  - The change does not alter the table's existing data.
+known_failure_modes:
+  - Adding the index without checking whether an equivalent one already
+    exists, creating redundant indexes.
+  - An index that doesn't actually cover the query's filter/sort pattern
+    (e.g. wrong column order in a compound index).
+  - A migration lacking a real downgrade path.

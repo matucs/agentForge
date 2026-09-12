@@ -7,14 +7,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.agents import router as agents_router
 from app.api.approvals import router as approvals_router
 from app.api.health import router as health_router
+from app.api.metrics import router as metrics_router
 from app.api.projects import router as projects_router
 from app.api.runs import router as runs_router
 from app.api.tasks import router as tasks_router
+from app.observability.logging import configure_logging
+from app.observability.tracing import configure_tracing
 from app.orchestration.graph import setup_checkpointer
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    configure_logging()
+    configure_tracing()
     await setup_checkpointer()
     yield
 
@@ -40,3 +45,4 @@ app.include_router(tasks_router)
 app.include_router(runs_router)
 app.include_router(agents_router)
 app.include_router(approvals_router)
+app.include_router(metrics_router)

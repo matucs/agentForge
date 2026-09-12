@@ -1,0 +1,20 @@
+name: pagination
+requirement: >
+  Add pagination to the users listing endpoint. Callers should be able to
+  request a page via `page` and `page_size` query parameters, and the
+  response should include the total item count alongside the page of
+  results.
+expected_behavior: >
+  The endpoint accepts page/page_size parameters, returns a bounded slice
+  of results, and reports the total count so a client can compute the
+  number of pages.
+acceptance_criteria:
+  - Requesting page=1 with a page_size smaller than the total item count
+    returns only that many items.
+  - The response includes a total count reflecting all matching items, not
+    just the returned page.
+  - An out-of-range page returns an empty result set, not an error.
+known_failure_modes:
+  - Off-by-one errors in the page/offset calculation.
+  - Total count computed from the paginated slice instead of the full
+    query.

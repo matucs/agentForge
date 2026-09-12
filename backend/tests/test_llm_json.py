@@ -33,24 +33,29 @@ class _ScriptedProvider(LLMProvider):
         text = self._responses[self.call_count]
         self.call_count += 1
         return LLMResponse(
-            text=text, model="scripted-model", provider=self.name, usage=LLMUsage(0, 0, 0.0)
+            text=text,
+            model="scripted-model",
+            provider=self.name,
+            usage=LLMUsage(input_tokens=10, output_tokens=5, estimated_cost_usd=0.001),
         )
 
 
 @pytest.mark.asyncio
 async def test_complete_structured_parses_clean_json_on_first_try() -> None:
     provider = _ScriptedProvider(['{"value": "ok"}'])
-    result = await complete_structured(
+    result, usage = await complete_structured(
         provider, system="sys", prompt="p", output_model=_ExampleOutput
     )
     assert result.value == "ok"
     assert provider.call_count == 1
+    assert usage.input_tokens == 10
+    assert usage.output_tokens == 5
 
 
 @pytest.mark.asyncio
 async def test_complete_structured_extracts_json_wrapped_in_prose_or_fences() -> None:
     provider = _ScriptedProvider(['Sure, here is the JSON:\n```json\n{"value": "ok"}\n```\n'])
-    result = await complete_structured(
+    result, _usage = await complete_structured(
         provider, system="sys", prompt="p", output_model=_ExampleOutput
     )
     assert result.value == "ok"
@@ -59,11 +64,15 @@ async def test_complete_structured_extracts_json_wrapped_in_prose_or_fences() ->
 @pytest.mark.asyncio
 async def test_complete_structured_retries_once_then_succeeds() -> None:
     provider = _ScriptedProvider(["not json at all", '{"value": "recovered"}'])
-    result = await complete_structured(
+    result, usage = await complete_structured(
         provider, system="sys", prompt="p", output_model=_ExampleOutput
     )
     assert result.value == "recovered"
     assert provider.call_count == 2
+    # Usage from BOTH attempts is accumulated — the failed first attempt
+    # still cost real tokens and must not be silently dropped.
+    assert usage.input_tokens == 20
+    assert usage.output_tokens == 10
 
 
 @pytest.mark.asyncio

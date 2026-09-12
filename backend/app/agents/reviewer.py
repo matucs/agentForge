@@ -4,6 +4,7 @@ routing/verification layer (ADR-003) — not a final approval."""
 
 from app.agents.llm_json import complete_structured
 from app.agents.schemas import ReviewOutput
+from app.llm.base import LLMUsage
 from app.llm.factory import get_default_provider
 
 _SYSTEM = """You are the Reviewer agent in an autonomous software \
@@ -23,7 +24,7 @@ object matching this schema, no markdown fences, no prose:
 }"""
 
 
-async def run_reviewer(requirement_text: str, diff: str) -> ReviewOutput:
+async def run_reviewer(requirement_text: str, diff: str) -> tuple[ReviewOutput, LLMUsage]:
     provider = get_default_provider()
     prompt = f"Requirement:\n{requirement_text}\n\nDiff:\n{diff}"
     return await complete_structured(

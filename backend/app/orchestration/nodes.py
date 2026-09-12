@@ -18,6 +18,7 @@ from app.agents.researcher import run_researcher
 from app.agents.reviewer import run_reviewer
 from app.agents.schemas import ArchitectOutput, PlannerOutput, ResearchOutput
 from app.agents.security import run_security_scan
+from app.config import get_settings
 from app.db.repositories import (
     AgentMessageRepository,
     ApprovalRepository,
@@ -31,12 +32,39 @@ from app.db.repositories import (
 from app.db.session import async_session_factory
 from app.git_integration.git_ops import changed_files, get_diff
 from app.git_integration.pr_service import open_pull_request
+from app.llm.base import LLMUsage
+from app.observability.instrumentation import instrument_node
+from app.orchestration.errors import BudgetExceededError, check_budget_exceeded
 from app.orchestration.state import AgentState
 from app.policy.engine import classify_risk, decide_policy
 from app.verification.checks import run_lint, run_typecheck
 from app.verification.gate import evaluate_gate
 
 _BASE_REF = "main"
+
+
+async def _record_llm_usage(run_id: str, usage: LLMUsage) -> None:
+    """Persists real usage from an LLM call and enforces the real budget
+    cutoff (spec §34) — never a fake/estimated figure."""
+    async with async_session_factory() as session:
+        run = await RunRepository(session).increment_usage(
+            run_id,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            cost_usd=usage.estimated_cost_usd,
+        )
+        await session.commit()
+
+    settings = get_settings()
+    over_budget = run is not None and check_budget_exceeded(
+        run.estimated_cost_usd, settings.max_run_budget_usd
+    )
+    if over_budget:
+        assert run is not None
+        raise BudgetExceededError(
+            f"Run {run_id} exceeded its budget: "
+            f"${run.estimated_cost_usd:.4f} > ${settings.max_run_budget_usd:.4f}"
+        )
 
 
 async def _persist_artifact_and_message(
@@ -80,9 +108,10 @@ async def _emit_failure(
         await session.commit()
 
 
+@instrument_node("planner")
 async def planner_node(state: AgentState) -> dict:
     try:
-        plan = await run_planner(state["requirement_text"])
+        plan, usage = await run_planner(state["requirement_text"])
     except Exception as exc:
         await _emit_failure(
             state,
@@ -92,6 +121,8 @@ async def planner_node(state: AgentState) -> dict:
             error=str(exc),
         )
         raise
+
+    await _record_llm_usage(state["run_id"], usage)
 
     await _persist_artifact_and_message(
         state,
@@ -108,10 +139,11 @@ async def planner_node(state: AgentState) -> dict:
     return {"plan": plan.model_dump()}
 
 
+@instrument_node("architect")
 async def architect_node(state: AgentState) -> dict:
     plan = PlannerOutput.model_validate(state["plan"])
     try:
-        architecture = await run_architect(state["requirement_text"], plan)
+        architecture, usage = await run_architect(state["requirement_text"], plan)
     except Exception as exc:
         await _emit_failure(
             state,
@@ -121,6 +153,8 @@ async def architect_node(state: AgentState) -> dict:
             error=str(exc),
         )
         raise
+
+    await _record_llm_usage(state["run_id"], usage)
 
     await _persist_artifact_and_message(
         state,
@@ -137,11 +171,12 @@ async def architect_node(state: AgentState) -> dict:
     return {"architecture": architecture.model_dump()}
 
 
+@instrument_node("researcher")
 async def researcher_node(state: AgentState) -> dict:
     plan = PlannerOutput.model_validate(state["plan"])
     architecture = ArchitectOutput.model_validate(state["architecture"])
     try:
-        research, discarded = await run_researcher(
+        research, discarded, usage = await run_researcher(
             state["requirement_text"], state["repo_path"], plan, architecture
         )
     except Exception as exc:
@@ -153,6 +188,8 @@ async def researcher_node(state: AgentState) -> dict:
             error=str(exc),
         )
         raise
+
+    await _record_llm_usage(state["run_id"], usage)
 
     await _persist_artifact_and_message(
         state,
@@ -194,6 +231,7 @@ def _build_retry_feedback(state: AgentState) -> str | None:
     return "\n\n".join(parts) if parts else None
 
 
+@instrument_node("developer")
 async def developer_node(state: AgentState) -> dict:
     plan = PlannerOutput.model_validate(state["plan"])
     architecture = ArchitectOutput.model_validate(state["architecture"])
@@ -201,7 +239,7 @@ async def developer_node(state: AgentState) -> dict:
     retry_feedback = _build_retry_feedback(state)
 
     try:
-        output = await run_developer(
+        output, usage = await run_developer(
             state["requirement_text"],
             plan,
             architecture,
@@ -220,6 +258,8 @@ async def developer_node(state: AgentState) -> dict:
             error=str(exc),
         )
         raise
+
+    await _record_llm_usage(state["run_id"], usage)
 
     async with async_session_factory() as session:
         await RunRepository(session).update(state["run_id"], branch_name=branch)
@@ -253,10 +293,11 @@ async def developer_node(state: AgentState) -> dict:
     return {"iteration_count": state["iteration_count"] + 1}
 
 
+@instrument_node("reviewer")
 async def reviewer_node(state: AgentState) -> dict:
     try:
         diff = get_diff(state["repo_path"], _BASE_REF)
-        output = await run_reviewer(state["requirement_text"], diff)
+        output, usage = await run_reviewer(state["requirement_text"], diff)
     except Exception as exc:
         await _emit_failure(
             state,
@@ -266,6 +307,8 @@ async def reviewer_node(state: AgentState) -> dict:
             error=str(exc),
         )
         raise
+
+    await _record_llm_usage(state["run_id"], usage)
 
     async with async_session_factory() as session:
         for finding in output.findings:
@@ -292,6 +335,7 @@ async def reviewer_node(state: AgentState) -> dict:
     return {"review_findings": [f.model_dump() for f in output.findings]}
 
 
+@instrument_node("qa")
 async def qa_node(state: AgentState) -> dict:
     result = run_qa(state["repo_path"])
 
@@ -329,6 +373,7 @@ async def qa_node(state: AgentState) -> dict:
     }
 
 
+@instrument_node("security")
 async def security_node(state: AgentState) -> dict:
     changed = changed_files(state["repo_path"], _BASE_REF)
     drafts = run_security_scan(state["repo_path"], changed)
@@ -359,6 +404,7 @@ async def security_node(state: AgentState) -> dict:
     return {"security_findings": [dataclasses.asdict(d) for d in drafts]}
 
 
+@instrument_node("verification")
 async def verification_node(state: AgentState) -> dict:
     try:
         typecheck_result = run_typecheck(state["repo_path"])
@@ -413,6 +459,7 @@ async def verification_node(state: AgentState) -> dict:
     }
 
 
+@instrument_node("policy")
 async def policy_node(state: AgentState) -> dict:
     verification_result = state["verification_result"] or {"overall_passed": False}
     verification_passed = verification_result.get("overall_passed", False)

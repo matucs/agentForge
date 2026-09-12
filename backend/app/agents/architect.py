@@ -4,6 +4,7 @@ with sound design — not to rubber-stamp it."""
 
 from app.agents.llm_json import complete_structured
 from app.agents.schemas import ArchitectOutput, PlannerOutput
+from app.llm.base import LLMUsage
 from app.llm.factory import get_default_provider
 
 _SYSTEM = """You are the Architect agent in an autonomous software \
@@ -22,7 +23,9 @@ matching this schema, no markdown fences, no prose:
 }"""
 
 
-async def run_architect(requirement_text: str, plan: PlannerOutput) -> ArchitectOutput:
+async def run_architect(
+    requirement_text: str, plan: PlannerOutput
+) -> tuple[ArchitectOutput, LLMUsage]:
     provider = get_default_provider()
     prompt = (
         f"Requirement:\n{requirement_text}\n\n"

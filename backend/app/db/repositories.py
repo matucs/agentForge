@@ -8,12 +8,15 @@ from app.db.models import (
     AgentMessage,
     Approval,
     Artifact,
+    Evaluation,
+    EvaluationRun,
     Project,
     Review,
     Run,
     SecurityFinding,
     Task,
     TestResult,
+    ToolCall,
     VerificationResult,
 )
 
@@ -85,6 +88,20 @@ class RunRepository:
             return None
         for key, value in fields.items():
             setattr(run, key, value)
+        await self._session.flush()
+        return run
+
+    async def increment_usage(
+        self, run_id: str, *, input_tokens: int, output_tokens: int, cost_usd: float
+    ) -> Run | None:
+        """Adds to the run's existing totals — never overwrites — so usage
+        from every agent call in the run accumulates correctly."""
+        run = await self._session.get(Run, run_id)
+        if run is None:
+            return None
+        run.total_input_tokens += input_tokens
+        run.total_output_tokens += output_tokens
+        run.estimated_cost_usd += cost_usd
         await self._session.flush()
         return run
 
@@ -314,6 +331,105 @@ class ApprovalRepository:
             setattr(approval, key, value)
         await self._session.flush()
         return approval
+
+
+class ToolCallRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def create(
+        self,
+        *,
+        run_id: str,
+        agent: str,
+        tool_name: str,
+        duration_seconds: float,
+        succeeded: bool,
+        result_summary: str | None = None,
+    ) -> ToolCall:
+        tool_call = ToolCall(
+            run_id=run_id,
+            agent=agent,
+            tool_name=tool_name,
+            duration_seconds=duration_seconds,
+            succeeded=succeeded,
+            result_summary=result_summary,
+        )
+        self._session.add(tool_call)
+        await self._session.flush()
+        return tool_call
+
+    async def list_by_run(self, run_id: str) -> list[ToolCall]:
+        result = await self._session.execute(
+            select(ToolCall)
+            .where(ToolCall.run_id == run_id)
+            .order_by(ToolCall.created_at, ToolCall.id)
+        )
+        return list(result.scalars().all())
+
+    async def list_all(self) -> list[ToolCall]:
+        """Used by the metrics endpoint to compute real per-agent
+        aggregates across every run — not scoped to one run_id."""
+        result = await self._session.execute(select(ToolCall))
+        return list(result.scalars().all())
+
+
+class EvaluationRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get_or_create(
+        self, *, name: str, task_file: str, description: str | None = None
+    ) -> Evaluation:
+        result = await self._session.execute(select(Evaluation).where(Evaluation.name == name))
+        existing = result.scalar_one_or_none()
+        if existing is not None:
+            return existing
+        evaluation = Evaluation(name=name, task_file=task_file, description=description)
+        self._session.add(evaluation)
+        await self._session.flush()
+        return evaluation
+
+    async def list(self) -> list[Evaluation]:
+        result = await self._session.execute(select(Evaluation).order_by(Evaluation.name))
+        return list(result.scalars().all())
+
+
+class EvaluationRunRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def create(
+        self,
+        *,
+        evaluation_id: str,
+        run_id: str | None,
+        success: bool,
+        duration_seconds: float,
+        estimated_cost_usd: float,
+        reviewer_correct: bool | None = None,
+        qa_detected: bool | None = None,
+        security_detected: bool | None = None,
+    ) -> EvaluationRun:
+        evaluation_run = EvaluationRun(
+            evaluation_id=evaluation_id,
+            run_id=run_id,
+            success=success,
+            duration_seconds=duration_seconds,
+            estimated_cost_usd=estimated_cost_usd,
+            reviewer_correct=reviewer_correct,
+            qa_detected=qa_detected,
+            security_detected=security_detected,
+        )
+        self._session.add(evaluation_run)
+        await self._session.flush()
+        return evaluation_run
+
+    async def list_by_evaluation(self, evaluation_id: str) -> list[EvaluationRun]:
+        result = await self._session.execute(
+            select(EvaluationRun).where(EvaluationRun.evaluation_id == evaluation_id)
+        )
+        return list(result.scalars().all())
 
 
 class AgentRepository:

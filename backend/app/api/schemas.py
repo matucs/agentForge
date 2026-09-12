@@ -123,6 +123,19 @@ class SecurityFindingOut(BaseModel):
     created_at: datetime
 
 
+class ToolCallOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    run_id: str
+    agent: str
+    tool_name: str
+    duration_seconds: float
+    succeeded: bool
+    result_summary: str | None
+    created_at: datetime
+
+
 class VerificationResultOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

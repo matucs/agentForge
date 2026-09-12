@@ -35,6 +35,4 @@ demo-failure:
 	@exit 1
 
 eval:
-	@echo "Not yet implemented — planned for Phase 8 (evaluation harness)."
-	@echo "See docs/limitations.md for current project status."
-	@exit 1
+	cd backend && . .venv/bin/activate && python -m app.evaluation.runner

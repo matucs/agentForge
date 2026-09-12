@@ -1,4 +1,4 @@
-# Limitations (current state, Phase 7)
+# Limitations (current state, Phase 8)
 
 This file exists so nothing in this repository is misrepresented. It is
 updated at the end of every phase.
@@ -147,12 +147,51 @@ updated at the end of every phase.
   test our own code" technique already used for the LLM retry logic and
   the orchestration timeout/cancel tests, not a simulation of GitHub's
   actual behavior.
+- **Token/cost tracking is now real** (Phase 8): `complete_structured`
+  (`app/agents/llm_json.py`) returns real usage alongside the parsed
+  output, accumulated across retries so a failed parse attempt's real
+  tokens are never dropped. `RunRepository.increment_usage` adds to (never
+  overwrites) `Run.total_input_tokens`/`total_output_tokens`/
+  `estimated_cost_usd` after every Planner/Architect/Researcher/Developer/
+  Reviewer call. Exceeding `MAX_RUN_BUDGET_USD` raises `BudgetExceededError`,
+  caught by `service.py` into a real `stopped_by_budget` status — tested
+  with real DB rows (`tests/test_budget.py`).
+- **Per-node observability is real** (`app/observability/`):
+  `instrument_node` wraps all nine orchestration nodes, writing a real
+  `ToolCall` row (duration, success/failure) and one structured log line
+  per execution, and creating a real OpenTelemetry span — verified with
+  `tests/test_instrumentation.py` (both the success and the
+  raised-exception path leave a correct row behind) and manually via a live
+  no-credentials run (`PLANNER_FAILED` correctly recorded as a failed
+  `ToolCall`). Structured logs and tracing are also wired at the run level
+  (`service.py`: `run_started`/`run_finished` events, a parent span per
+  run).
+- **`GET /api/metrics` is real** (`app/observability/metrics.py`,
+  Prometheus text format): every Gauge is `.set()` from a live DB query at
+  request time — verified two ways: `tests/test_metrics.py` seeds real rows
+  and asserts the exposed text matches, and manually via a live HTTP
+  request (ran one real no-credentials pipeline, hit `/api/metrics`,
+  confirmed `runs_total`/`runs_by_status{status="failed"}` matched a direct
+  `SELECT count(*) ... GROUP BY status` on the same database).
+- **The evaluation harness is real** (`evals/tasks/*.yaml`,
+  `app/evaluation/`): five task definitions load and validate
+  (`tests/test_evaluation.py`, including a rejected malformed file); the
+  runner executes each task through the real orchestration service
+  (`run_to_completion`, `service.py`) against a disposable temp git fixture
+  repo — the same code path a live run takes. The no-credentials path is
+  always-on and tested as a real subprocess invocation of
+  `python -m app.evaluation.runner`, asserting the exact spec §35 message
+  and a non-zero exit; manually confirmed via `make eval` in this
+  environment (no key configured here). Reviewer/QA/Security detection
+  rate is intentionally left unmeasured (`EvaluationRun.reviewer_correct`
+  etc. stay `None`) rather than invented — computing it honestly needs a
+  task with a *known* injected bug to check detection against, which is
+  Phase 10's failure-injection harness, not built yet.
 
 ## What does not exist yet
 
-- No failure-injection demos, no evaluation harness, no observability
-  pipeline (OpenTelemetry/LangSmith), and no dashboard pages beyond the
-  health panel on `/`.
+- No failure-injection demos yet, and no dashboard pages beyond the health
+  panel on `/`.
 - No dependency/CVE vulnerability database check — Security is a static
   pattern scan only (see Phase 5 trade-offs).
 - No Slack/n8n notification when a run reaches `awaiting_approval` — an
@@ -160,15 +199,39 @@ updated at the end of every phase.
   Phase 11.
 - No PR update/close/merge operations, and no webhook handling for PR
   status changes coming back from GitHub — only creation.
+- No separate LangSmith/Braintrust integration (see Phase 8 trade-offs
+  below) — OpenTelemetry tracing plus the local console fallback is the
+  observability backend actually implemented.
+- No Grafana/Prometheus server wired into Docker Compose — `/api/metrics`
+  is a real Prometheus-compatible endpoint, but nothing currently scrapes
+  it in this repo's `docker-compose.yml`.
 - CI runs lint/type-check/tests for the real code that exists (including
   the deterministic verification/policy/Developer/QA/Security/git_ops/
-  github_client tests), but the full agent pipeline's real-LLM path and
-  the real-GitHub-PR path are not exercised in CI — no API key/GitHub
-  token is configured there, by design (never commit one), so those paths
-  only run wherever a developer has added their own credentials locally.
+  github_client/instrumentation/metrics/evaluation tests), but the full
+  agent pipeline's real-LLM path, the real-GitHub-PR path, and a real
+  `make eval` run are not exercised in CI — no API key/GitHub token is
+  configured there, by design (never commit one), so those paths only run
+  wherever a developer has added their own credentials locally.
 
 ## Bugs found and fixed during development
 
+- **A structured-logging call silently killed every node execution's
+  finally-block cleanup (Phase 8).** `_logger.info("agent_execution",
+  event=f"{agent_name}_node", ...)` passed `event` as both structlog's
+  implicit first-positional-argument event name AND an explicit keyword,
+  raising `TypeError: ... got multiple values for argument 'event'` inside
+  `instrument_node`'s `finally` block — the ToolCall row was never written,
+  and because this happened deep inside LangGraph's node-execution
+  machinery, the resulting exception replaced the original one being
+  propagated and the whole run silently hung at `status="running"` forever
+  instead of ending `failed` (its background asyncio task raised, but
+  nothing was polling it or logging the failure). Found because
+  `tests/test_orchestration.py`'s timeout-sensitive tests started failing
+  (`did not reach a terminal state within 5.0s`) immediately after wiring
+  `instrument_node` into `nodes.py` — a real regression a real test caught,
+  not found by inspection. Fixed by passing the event name only positionally
+  (structlog already renders it as the `event` field) in both
+  `instrumentation.py` and `service.py`'s equivalent calls.
 - **`created_at` was frozen at migration-apply time for every table, for
   every row, since Phase 1.** `TimestampMixin` used
   `server_default="now()"` — a bare Python string, which SQLAlchemy binds as
@@ -335,3 +398,36 @@ updated at the end of every phase.
   GitHub repository, a meaningfully bigger setup step than the Anthropic
   API key was). The `skipif`-guarded test and the wiring are real and ready
   to run the moment credentials are added.
+
+## Known trade-offs made in Phase 8
+
+- **No separate LangSmith/Braintrust SDK integration**, by deliberate
+  choice: spec §15 explicitly treats these as optional ("if configured...
+  if unavailable, must still work"), and our `LLMProvider` abstraction
+  calls raw provider SDKs directly (not LangChain's `ChatAnthropic`/
+  `ChatOpenAI` wrappers), so LangSmith's usual automatic instrumentation
+  wouldn't trace those calls anyway without extra manual `@traceable`
+  wiring. Real OpenTelemetry spans already satisfy the tracing requirement
+  with zero added SaaS dependency; adding a second backend on top would be
+  scope creep without new observability value.
+- **`/api/metrics` recomputes every value from the database on every
+  scrape** rather than maintaining running in-memory counters. This is
+  the more honest choice (a number can never drift from what's actually in
+  the database) at the cost of a query fan-out per scrape — fine at this
+  project's scale, would need revisiting for a very high-frequency
+  Prometheus scrape interval against a much larger dataset.
+- **The evaluation harness measures real pipeline outcomes (success,
+  duration, cost) but not agent *accuracy*** (Reviewer/QA/Security
+  detection rate). Spec §14's example output includes those percentages;
+  computing them for real requires a task with a *known* injected bug so a
+  detection can be checked against ground truth — that's Phase 10's
+  failure-injection harness. Rather than inventing plausible-looking
+  percentages now, `EvaluationRun.reviewer_correct`/`qa_detected`/
+  `security_detected` are left `None` (the schema already supports this —
+  nullable columns from Phase 1) until Phase 10 can populate them
+  honestly.
+- **The evaluation runner processes tasks sequentially, one at a time**,
+  awaiting each real pipeline run to completion before starting the next
+  (`run_to_completion`, not the API's fire-and-forget `start_run`). Simple
+  and correct; slower than running the 5 tasks concurrently, which would
+  be a reasonable future optimization once evaluation sets grow larger.

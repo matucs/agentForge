@@ -9,6 +9,7 @@ from app.api.schemas import (
     RunOut,
     SecurityFindingOut,
     TestResultOut,
+    ToolCallOut,
     VerificationResultOut,
 )
 from app.db.repositories import (
@@ -19,6 +20,7 @@ from app.db.repositories import (
     SecurityFindingRepository,
     TaskRepository,
     TestResultRepository,
+    ToolCallRepository,
     VerificationResultRepository,
 )
 from app.db.session import get_session
@@ -124,6 +126,17 @@ async def list_run_verification_results(
         raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
     results = await VerificationResultRepository(session).list_by_run(run_id)
     return [VerificationResultOut.model_validate(r) for r in results]
+
+
+@router.get("/{run_id}/tool-calls", response_model=list[ToolCallOut])
+async def list_run_tool_calls(
+    run_id: str, session: AsyncSession = Depends(get_session)
+) -> list[ToolCallOut]:
+    run = await RunRepository(session).get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    tool_calls = await ToolCallRepository(session).list_by_run(run_id)
+    return [ToolCallOut.model_validate(t) for t in tool_calls]
 
 
 @router.post("/{run_id}/start", response_model=RunOut, status_code=202)

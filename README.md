@@ -17,11 +17,11 @@ before they reach the final result.
 
 This repository is being built incrementally, phase by phase (see
 [docs/limitations.md](docs/limitations.md) for exactly what exists today vs.
-what's planned). **Phases 1–7 — repository scaffold, backend domain
+what's planned). **Phases 1–8 — repository scaffold, backend domain
 services, the LangGraph orchestration skeleton, all seven engineering
 agents, the deterministic verification gate, the risk-based policy engine,
-and GitHub PR creation — are complete.** Observability/evaluation
-pipelines and the dashboard UI are not implemented yet.
+GitHub PR creation, and observability/evaluation — are complete.** The
+dashboard UI is not implemented yet.
 
 ### What works right now
 
@@ -117,6 +117,36 @@ pipelines and the dashboard UI are not implemented yet.
   a real HTTP request: approve → run completed → real skip event, no
   fake artifact). A real-PR test exists, `skipif`-guarded on credentials
   being configured.
+- **Real token/cost tracking and budget enforcement**: `Run.total_input_tokens`/
+  `total_output_tokens`/`estimated_cost_usd` — silently `0` forever until
+  this phase, which read exactly like the "fake token usage" spec §35
+  forbids even though it was an omission, not a fabrication — now
+  accumulate real usage from every LLM call. A run whose real accumulated
+  cost exceeds `MAX_RUN_BUDGET_USD` (spec §34) stops with a real
+  `stopped_by_budget` status, not a generic failure.
+- **Real observability** (`backend/app/observability/`): structured JSON
+  logs (`structlog`) with the spec §16 fields (timestamp/run_id/task_id/
+  agent/event/duration/status); OpenTelemetry spans around every node and
+  the overall run (a real OTLP exporter if `OTEL_EXPORTER_OTLP_ENDPOINT` is
+  set, a real console exporter otherwise — spans are always real, only the
+  export target differs); a real per-node `ToolCall` row
+  (`GET /api/runs/:id/tool-calls`) recording actual duration/success, the
+  real data source behind the metrics below (not an estimate).
+- **`GET /api/metrics`** (Prometheus text format): every value is computed
+  live from a real DB query at request time — runs by status, verification
+  failures, human approvals, summed real token usage/cost, and per-agent
+  average duration/error counts from `tool_calls`. Verified live: seeded
+  real rows, confirmed the endpoint's numbers match a direct SQL count.
+- **A real evaluation harness** (`evals/tasks/*.yaml` + `make eval`): five
+  task definitions (the spec's own examples — pagination, authentication,
+  websocket-reconnect, database-index, api-validation) executed through
+  the actual orchestration service against a disposable git fixture repo,
+  not a separate simulation path. No LLM credentials configured → prints
+  spec §35's exact "Integration unavailable" message and exits non-zero —
+  verified live in this environment (no key configured here) — never a
+  fabricated report. Reviewer/QA/Security "detection rate" is honestly
+  reported as not-yet-measurable rather than invented, since computing it
+  for real needs the Phase 10 failure-injection harness.
 - A Next.js/TypeScript/Tailwind frontend that renders the *live* health
   response from the backend.
 - Docker Compose bringing up Postgres, Redis, backend, and frontend together
@@ -126,9 +156,8 @@ pipelines and the dashboard UI are not implemented yet.
 
 ### What's not built yet
 
-Observability/evaluation pipelines, the full dashboard, and
-failure-injection demos are all planned in later phases — see the roadmap
-below and [docs/limitations.md](docs/limitations.md).
+The full dashboard UI and failure-injection demos are planned in later
+phases — see the roadmap below and [docs/limitations.md](docs/limitations.md).
 
 ## Architecture
 
@@ -202,7 +231,7 @@ npx tsc --noEmit && npm run build
 | 5 ✅ | Developer / Reviewer / QA / Security agents (real git commits, real test execution, real static scan) |
 | 6 ✅ | Deterministic verification gate + risk-based policy engine |
 | 7 ✅ | Git integration: real GitHub PR creation (push + REST API) |
-| 8 | Observability + evaluation harness |
+| 8 ✅ | Observability (structured logs, metrics, tracing, real cost/budget tracking) + evaluation harness |
 | 9 | Frontend dashboard (runs, tasks, agents, approvals, operations) |
 | 10 | Failure-injection demos |
 | 11 | n8n / Slack integration |

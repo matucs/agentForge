@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from datetime import UTC, datetime
 
 from langchain_core.runnables import RunnableConfig
@@ -7,10 +8,15 @@ from langchain_core.runnables import RunnableConfig
 from app.config import get_settings
 from app.db.repositories import ProjectRepository, RunRepository, TaskRepository
 from app.db.session import async_session_factory
+from app.observability.logging import get_logger
+from app.observability.tracing import get_tracer
+from app.orchestration.errors import BudgetExceededError
 from app.orchestration.graph import build_graph, checkpointer_context
 from app.orchestration.state import AgentState
 
 logger = logging.getLogger(__name__)
+_struct_logger = get_logger(__name__)
+_tracer = get_tracer(__name__)
 
 # In-process registry of running orchestration tasks, keyed by run_id, so a
 # run can be cancelled via the API. This registry is intentionally not
@@ -61,6 +67,7 @@ async def _load_initial_state(run_id: str) -> AgentState:
 
 async def _run_graph(run_id: str) -> None:
     settings = get_settings()
+    started_at = time.monotonic()
 
     async with async_session_factory() as session:
         await RunRepository(session).update(
@@ -68,60 +75,88 @@ async def _run_graph(run_id: str) -> None:
         )
         await session.commit()
 
-    try:
-        initial_state = await _load_initial_state(run_id)
+    _struct_logger.info("run_started", run_id=run_id, status="running")
 
-        async with checkpointer_context() as checkpointer:
-            graph = build_graph().compile(checkpointer=checkpointer)
-            config: RunnableConfig = {"configurable": {"thread_id": run_id}}
-            final_state = await asyncio.wait_for(
-                graph.ainvoke(initial_state, config=config),
-                timeout=settings.max_workflow_seconds,
-            )
+    with _tracer.start_as_current_span("run") as span:
+        span.set_attribute("run_id", run_id)
+        try:
+            initial_state = await _load_initial_state(run_id)
 
-        async with async_session_factory() as session:
-            repo = RunRepository(session)
-            # policy_node (Phase 6) already sets the real terminal status —
-            # "completed", "blocked", or "awaiting_approval" — before the
-            # graph reaches END. Only fall back to "completed" here if that
-            # never happened (e.g. an older/placeholder policy node), so
-            # this never clobbers a real block/approval-pending decision.
-            current = await repo.get(run_id)
-            status = current.status if current and current.status != "running" else "completed"
-            await repo.update(
-                run_id,
-                status=status,
-                finished_at=datetime.now(UTC),
-                iteration_count=final_state["iteration_count"],
-                final_decision=final_state.get("final_decision"),
-            )
-            await session.commit()
+            async with checkpointer_context() as checkpointer:
+                graph = build_graph().compile(checkpointer=checkpointer)
+                config: RunnableConfig = {"configurable": {"thread_id": run_id}}
+                final_state = await asyncio.wait_for(
+                    graph.ainvoke(initial_state, config=config),
+                    timeout=settings.max_workflow_seconds,
+                )
 
-    except TimeoutError:
-        async with async_session_factory() as session:
-            await RunRepository(session).update(
-                run_id, status="stopped_by_timeout", finished_at=datetime.now(UTC)
-            )
-            await session.commit()
+            async with async_session_factory() as session:
+                repo = RunRepository(session)
+                # policy_node (Phase 6) already sets the real terminal
+                # status — "completed", "blocked", or "awaiting_approval" —
+                # before the graph reaches END. Only fall back to
+                # "completed" here if that never happened (e.g. an older/
+                # placeholder policy node), so this never clobbers a real
+                # block/approval-pending decision.
+                current = await repo.get(run_id)
+                status = (
+                    current.status if current and current.status != "running" else "completed"
+                )
+                await repo.update(
+                    run_id,
+                    status=status,
+                    finished_at=datetime.now(UTC),
+                    iteration_count=final_state["iteration_count"],
+                    final_decision=final_state.get("final_decision"),
+                )
+                await session.commit()
+            _log_run_finished(run_id, status, started_at)
 
-    except asyncio.CancelledError:
-        async with async_session_factory() as session:
-            await RunRepository(session).update(
-                run_id, status="cancelled", finished_at=datetime.now(UTC)
-            )
-            await session.commit()
-        raise
+        except TimeoutError:
+            async with async_session_factory() as session:
+                await RunRepository(session).update(
+                    run_id, status="stopped_by_timeout", finished_at=datetime.now(UTC)
+                )
+                await session.commit()
+            _log_run_finished(run_id, "stopped_by_timeout", started_at)
 
-    except Exception:
-        logger.exception("Run %s failed", run_id)
-        async with async_session_factory() as session:
-            await RunRepository(session).update(
-                run_id, status="failed", finished_at=datetime.now(UTC)
-            )
-            await session.commit()
+        except BudgetExceededError:
+            async with async_session_factory() as session:
+                await RunRepository(session).update(
+                    run_id, status="stopped_by_budget", finished_at=datetime.now(UTC)
+                )
+                await session.commit()
+            _log_run_finished(run_id, "stopped_by_budget", started_at)
 
-    finally:
-        _running_tasks.pop(run_id, None)
+        except asyncio.CancelledError:
+            async with async_session_factory() as session:
+                await RunRepository(session).update(
+                    run_id, status="cancelled", finished_at=datetime.now(UTC)
+                )
+                await session.commit()
+            _log_run_finished(run_id, "cancelled", started_at)
+            raise
+
+        except Exception:
+            logger.exception("Run %s failed", run_id)
+            async with async_session_factory() as session:
+                await RunRepository(session).update(
+                    run_id, status="failed", finished_at=datetime.now(UTC)
+                )
+                await session.commit()
+            _log_run_finished(run_id, "failed", started_at)
+
+        finally:
+            _running_tasks.pop(run_id, None)
+
+
+def _log_run_finished(run_id: str, status: str, started_at: float) -> None:
+    _struct_logger.info(
+        "run_finished",
+        run_id=run_id,
+        status=status,
+        duration=round(time.monotonic() - started_at, 4),
+    )
 
 
 async def start_run(run_id: str) -> None:
@@ -142,3 +177,11 @@ def cancel_run(run_id: str) -> bool:
         return False
     task.cancel()
     return True
+
+
+async def run_to_completion(run_id: str) -> None:
+    """Awaits the same execution `start_run` schedules in the background,
+    without the cancellation registry — for callers (the evaluation runner)
+    that want to run one task at a time and wait for a real result rather
+    than fire-and-forget via the API."""
+    await _run_graph(run_id)

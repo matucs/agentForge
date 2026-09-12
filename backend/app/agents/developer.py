@@ -8,6 +8,7 @@ agents in this project.
 from app.agents.llm_json import complete_structured
 from app.agents.schemas import ArchitectOutput, DeveloperOutput, PlannerOutput, ResearchOutput
 from app.git_integration import git_ops
+from app.llm.base import LLMUsage
 from app.llm.factory import get_default_provider
 
 _SYSTEM = """You are the Developer agent in an autonomous software \
@@ -42,7 +43,7 @@ async def run_developer(
     research: ResearchOutput,
     *,
     retry_feedback: str | None = None,
-) -> DeveloperOutput:
+) -> tuple[DeveloperOutput, LLMUsage]:
     provider = get_default_provider()
     system = _SYSTEM + (_RETRY_SYSTEM_SUFFIX if retry_feedback else "")
     prompt = (

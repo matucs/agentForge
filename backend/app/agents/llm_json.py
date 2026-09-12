@@ -12,7 +12,7 @@ from typing import TypeVar
 
 from pydantic import BaseModel, ValidationError
 
-from app.llm.base import LLMProvider
+from app.llm.base import LLMProvider, LLMUsage
 
 _JSON_BLOCK = re.compile(r"\{.*\}", re.DOTALL)
 
@@ -40,17 +40,22 @@ async def complete_structured(
     prompt: str,
     output_model: type[T],
     max_tokens: int = 2048,
-) -> T:
+) -> tuple[T, LLMUsage]:
+    """Returns (parsed output, usage). Usage is accumulated across every
+    attempt (including a failed parse that still cost real tokens) so a
+    caller's cost/budget tracking is never short-changed by a retry."""
     last_error: Exception | None = None
     current_prompt = prompt
+    total_usage: LLMUsage | None = None
 
     for _attempt in range(2):
         response = await provider.complete(
             system=system, prompt=current_prompt, max_tokens=max_tokens
         )
+        total_usage = _sum_usage(total_usage, response.usage)
         try:
             data = _extract_json(response.text)
-            return output_model.model_validate(data)
+            return output_model.model_validate(data), total_usage
         except (json.JSONDecodeError, ValidationError) as exc:
             last_error = exc
             current_prompt = (
@@ -61,4 +66,14 @@ async def complete_structured(
 
     raise AgentOutputParseError(
         f"{output_model.__name__} could not be parsed after 2 attempts: {last_error}"
+    )
+
+
+def _sum_usage(existing: LLMUsage | None, addition: LLMUsage) -> LLMUsage:
+    if existing is None:
+        return addition
+    return LLMUsage(
+        input_tokens=existing.input_tokens + addition.input_tokens,
+        output_tokens=existing.output_tokens + addition.output_tokens,
+        estimated_cost_usd=existing.estimated_cost_usd + addition.estimated_cost_usd,
     )

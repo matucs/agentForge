@@ -1,0 +1,21 @@
+name: authentication
+requirement: >
+  Add a login endpoint that accepts a username and password, verifies the
+  password against a stored hash, and returns a signed session token on
+  success.
+expected_behavior: >
+  A correct username/password pair returns a token; an incorrect password
+  or unknown username is rejected with the same generic error (no
+  user-enumeration signal), and passwords are never stored or logged in
+  plaintext.
+acceptance_criteria:
+  - A valid credential pair returns a 200 with a token.
+  - An invalid password returns the same error/status as an unknown
+    username.
+  - The stored representation of the password is a salted hash, not
+    plaintext.
+known_failure_modes:
+  - Timing differences between "unknown user" and "wrong password" paths
+    leaking which one occurred.
+  - Logging the raw password in an error message or access log.
+  - Missing rate limiting on repeated failed attempts.

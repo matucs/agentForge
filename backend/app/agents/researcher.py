@@ -10,6 +10,7 @@ import re
 from app.agents.llm_json import complete_structured
 from app.agents.repo_tools import list_files, search_keyword
 from app.agents.schemas import ArchitectOutput, PlannerOutput, ResearchFinding, ResearchOutput
+from app.llm.base import LLMUsage
 from app.llm.factory import get_default_provider
 
 _STOPWORDS = {
@@ -74,10 +75,10 @@ async def run_researcher(
     repo_path: str,
     plan: PlannerOutput,
     architecture: ArchitectOutput,
-) -> tuple[ResearchOutput, list[ResearchFinding]]:
-    """Returns (grounded output, discarded findings) — callers should persist
-    both so a dropped, ungrounded finding is visible in the artifact, not
-    silently swallowed."""
+) -> tuple[ResearchOutput, list[ResearchFinding], LLMUsage]:
+    """Returns (grounded output, discarded findings, usage) — callers should
+    persist both output and discarded so a dropped, ungrounded finding is
+    visible in the artifact, not silently swallowed."""
     scanned_files = list_files(repo_path)
     scanned_set = set(scanned_files)
 
@@ -98,9 +99,9 @@ async def run_researcher(
         f"Repository evidence:\n" + "\n".join(evidence_lines)
     )
 
-    raw_output = await complete_structured(
+    raw_output, usage = await complete_structured(
         provider, system=_SYSTEM, prompt=prompt, output_model=ResearchOutput
     )
 
     grounded, discarded = filter_grounded_findings(raw_output.findings, scanned_set)
-    return ResearchOutput(findings=grounded), discarded
+    return ResearchOutput(findings=grounded), discarded, usage
