@@ -9,6 +9,7 @@ from app.git_integration.git_ops import (
     ensure_branch,
     get_current_branch,
     get_diff,
+    push_branch,
     write_files,
 )
 
@@ -77,3 +78,32 @@ def test_changed_files_lists_only_real_diff_paths(git_repo: str) -> None:
 
     files = changed_files(git_repo, "main")
     assert set(files) == {"a.txt", "b.txt"}
+
+
+def test_push_branch_pushes_to_a_real_remote(git_repo: str, tmp_path_factory) -> None:
+    # A real local bare repo stands in for "GitHub" here — git itself treats
+    # a filesystem path as a perfectly valid remote URL, so this exercises
+    # real `git push` mechanics (refspec, remote resolution) without any
+    # network dependency.
+    remote_path = str(tmp_path_factory.mktemp("remote"))
+    subprocess.run(["git", "init", "-q", "--bare", remote_path], check=True)
+
+    ensure_branch(git_repo, "agentforge/task-1")
+    write_files(git_repo, {"a.txt": "pushed content\n"})
+    commit_all(git_repo, "add a.txt")
+
+    push_branch(git_repo, "agentforge/task-1", remote_path)
+
+    branch_list = subprocess.run(
+        ["git", "branch", "--list", "agentforge/task-1"],
+        cwd=remote_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "agentforge/task-1" in branch_list.stdout
+
+
+def test_push_branch_raises_on_a_real_failure(git_repo: str) -> None:
+    with pytest.raises(GitOperationError):
+        push_branch(git_repo, "main", "/no/such/remote/path")

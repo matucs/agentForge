@@ -30,12 +30,14 @@ from app.db.repositories import (
 )
 from app.db.session import async_session_factory
 from app.git_integration.git_ops import changed_files, get_diff
+from app.git_integration.pr_service import open_pull_request
 from app.orchestration.state import AgentState
 from app.policy.engine import classify_risk, decide_policy
 from app.verification.checks import run_lint, run_typecheck
 from app.verification.gate import evaluate_gate
 
 _BASE_REF = "main"
+
 
 async def _persist_artifact_and_message(
     state: AgentState,
@@ -456,5 +458,12 @@ async def policy_node(state: AgentState) -> dict:
             payload={"decision": decision, "risk_level": risk},
         )
         await session.commit()
+
+    if decision == "AUTO_APPROVED":
+        # PR creation is additive, not a merge gate — the policy decision
+        # already happened above. A failure here (no credentials, a real
+        # push/API error) is recorded by open_pull_request itself and must
+        # never revert `completed`.
+        await open_pull_request(state["run_id"])
 
     return {"final_decision": decision, "status": "completed"}

@@ -17,11 +17,11 @@ before they reach the final result.
 
 This repository is being built incrementally, phase by phase (see
 [docs/limitations.md](docs/limitations.md) for exactly what exists today vs.
-what's planned). **Phases 1–6 — repository scaffold, backend domain
+what's planned). **Phases 1–7 — repository scaffold, backend domain
 services, the LangGraph orchestration skeleton, all seven engineering
-agents, the deterministic verification gate, and the risk-based policy
-engine — are complete.** Git PR automation, observability/evaluation
-pipelines, and the dashboard UI are not implemented yet.
+agents, the deterministic verification gate, the risk-based policy engine,
+and GitHub PR creation — are complete.** Observability/evaluation
+pipelines and the dashboard UI are not implemented yet.
 
 ### What works right now
 
@@ -107,6 +107,16 @@ pipelines, and the dashboard UI are not implemented yet.
   approval path at all. New endpoints: `GET /api/approvals`, `POST
   /api/approvals/:id/approve|reject` (spec §22) — enforcement lives here,
   not in whatever a client chooses to render.
+- **Real GitHub PR creation** (`backend/app/git_integration/`) once a
+  change is authorized to merge (auto-approved by policy, or a human
+  approval): `git_ops.push_branch` really pushes the Developer's branch,
+  and `github_client.py` makes a real `POST .../pulls` call to the GitHub
+  REST API. No `GITHUB_TOKEN`/`GITHUB_REPO` configured → a real
+  `PR_CREATION_SKIPPED` message explaining exactly why, never a fabricated
+  PR link — the only path exercised live in this environment (verified via
+  a real HTTP request: approve → run completed → real skip event, no
+  fake artifact). A real-PR test exists, `skipif`-guarded on credentials
+  being configured.
 - A Next.js/TypeScript/Tailwind frontend that renders the *live* health
   response from the backend.
 - Docker Compose bringing up Postgres, Redis, backend, and frontend together
@@ -116,9 +126,9 @@ pipelines, and the dashboard UI are not implemented yet.
 
 ### What's not built yet
 
-GitHub PR creation on approval, observability/evaluation pipelines,
-the full dashboard, and failure-injection demos are all planned in later
-phases — see the roadmap below and [docs/limitations.md](docs/limitations.md).
+Observability/evaluation pipelines, the full dashboard, and
+failure-injection demos are all planned in later phases — see the roadmap
+below and [docs/limitations.md](docs/limitations.md).
 
 ## Architecture
 
@@ -191,7 +201,7 @@ npx tsc --noEmit && npm run build
 | 4 ✅ | Planner / Architect / Researcher agents (real LLM calls, grounded research) |
 | 5 ✅ | Developer / Reviewer / QA / Security agents (real git commits, real test execution, real static scan) |
 | 6 ✅ | Deterministic verification gate + risk-based policy engine |
-| 7 | Git integration: GitHub PR creation (branch/commit already real since Phase 5) |
+| 7 ✅ | Git integration: real GitHub PR creation (push + REST API) |
 | 8 | Observability + evaluation harness |
 | 9 | Frontend dashboard (runs, tasks, agents, approvals, operations) |
 | 10 | Failure-injection demos |

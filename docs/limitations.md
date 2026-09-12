@@ -1,4 +1,4 @@
-# Limitations (current state, Phase 6)
+# Limitations (current state, Phase 7)
 
 This file exists so nothing in this repository is misrepresented. It is
 updated at the end of every phase.
@@ -123,25 +123,49 @@ updated at the end of every phase.
   decides. `service.py`'s post-graph status write was fixed to respect
   whatever `policy_node` already set, rather than unconditionally
   overwriting it with `"completed"` (see Bugs section).
+- **Real GitHub PR creation is wired in** (`backend/app/git_integration/`):
+  `github_client.py` is a real REST client (`POST /repos/{owner}/{repo}/pulls`)
+  with the same "unavailable, never fake success" contract as the
+  `LLMProvider` abstraction (`GitHubClientUnavailable`), and `git_ops.py`
+  gained a real `push_branch` (tested against an actual local bare
+  repository standing in for "GitHub" — real `git push` mechanics, refspec
+  and all, with zero network dependency, `tests/test_git_ops.py`).
+  `pr_service.open_pull_request` is called after a run is already
+  `completed` (auto-approved, or via `POST /api/approvals/:id/approve`) —
+  PR creation is additive, never a merge gate, so a failure there is
+  recorded and never reverts the policy decision. **Verified two ways in
+  this environment (no `GITHUB_TOKEN` configured yet)**: the "no
+  credentials" path is exercised for real
+  (`test_open_pull_request_skips_cleanly_without_github_credentials`, and
+  manually via a live HTTP request — approve a seeded pending approval →
+  run flips to `completed` → a real `PR_CREATION_SKIPPED` event with the
+  actual reason text, zero PR artifacts created); a real-PR test exists,
+  `skipif`-guarded on `GITHUB_TOKEN`/`GITHUB_REPO`, not run yet here. The
+  GitHub client's own request/response handling (auth header, URL, success
+  parsing, error surfacing) is unit-tested with `httpx.MockTransport`
+  (`tests/test_github_client.py`) — the same "fake the network boundary,
+  test our own code" technique already used for the LLM retry logic and
+  the orchestration timeout/cancel tests, not a simulation of GitHub's
+  actual behavior.
 
 ## What does not exist yet
 
-- No GitHub PR creation on approval (Phase 5's git operations are
-  local-only: real branches and commits, never a push or a remote API
-  call), no failure-injection demos, no evaluation harness, no
-  observability pipeline (OpenTelemetry/LangSmith), and no dashboard pages
-  beyond the health panel on `/`.
+- No failure-injection demos, no evaluation harness, no observability
+  pipeline (OpenTelemetry/LangSmith), and no dashboard pages beyond the
+  health panel on `/`.
 - No dependency/CVE vulnerability database check — Security is a static
   pattern scan only (see Phase 5 trade-offs).
 - No Slack/n8n notification when a run reaches `awaiting_approval` — an
   operator has to poll `GET /api/approvals` themselves; that integration is
   Phase 11.
+- No PR update/close/merge operations, and no webhook handling for PR
+  status changes coming back from GitHub — only creation.
 - CI runs lint/type-check/tests for the real code that exists (including
-  the deterministic verification/policy/Developer/QA/Security/git_ops
-  tests), but the full agent pipeline's real-LLM path is not exercised in
-  CI — no API key is configured there, by design (never commit one), so
-  that path only runs wherever a developer has added their own key
-  locally.
+  the deterministic verification/policy/Developer/QA/Security/git_ops/
+  github_client tests), but the full agent pipeline's real-LLM path and
+  the real-GitHub-PR path are not exercised in CI — no API key/GitHub
+  token is configured there, by design (never commit one), so those paths
+  only run wherever a developer has added their own credentials locally.
 
 ## Bugs found and fixed during development
 
@@ -283,3 +307,31 @@ updated at the end of every phase.
   conditions). A stricter policy could treat lint as blocking too; this
   system currently treats it as informational only, recorded in
   `VerificationResult` but never in `blocking_reasons`.
+
+## Known trade-offs made in Phase 7
+
+- **The push URL embeds the token rather than assuming a pre-configured
+  remote.** `pr_service` builds
+  `https://x-access-token:<token>@github.com/<owner>/<repo>.git` from
+  settings and pushes to it explicitly, rather than requiring `repo_path`
+  to already have a correctly configured GitHub `origin`. This lets any
+  local working tree — including throwaway temp fixture repos — be pushed
+  to a real configured GitHub repo without per-repo remote setup, at the
+  cost of the token briefly appearing in a subprocess argument list (not
+  logged by this codebase, but visible to anything else inspecting process
+  arguments on the host — a real consideration for a genuinely
+  security-sensitive deployment, not addressed here).
+- **PR creation always targets `main` as the base branch** (`_BASE_BRANCH`
+  in `pr_service.py`), matching the same assumption `git_ops.ensure_branch`
+  already makes about the default branch name (Phase 5). Not configurable
+  per-project yet.
+- **No retry on a transient GitHub API failure** (rate limit, momentary
+  5xx) — a failure is recorded as `PR_CREATION_FAILED` once and that's it;
+  there's no automatic re-attempt. An operator would need to notice and
+  manually retry (there's no API endpoint for that yet either).
+- **Real end-to-end PR creation has not been exercised in this
+  environment** — no `GITHUB_TOKEN`/`GITHUB_REPO` were configured for this
+  pass (a deliberate choice: doing so live would need a disposable real
+  GitHub repository, a meaningfully bigger setup step than the Anthropic
+  API key was). The `skipif`-guarded test and the wiring are real and ready
+  to run the moment credentials are added.

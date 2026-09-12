@@ -1,8 +1,8 @@
 """Real Git working-tree operations, shelling out to the `git` CLI.
 
 Every function here does the real thing — creates a real branch, writes
-real files, makes a real commit — against `repo_path` on disk. Nothing is
-simulated. Never pushes to a remote; that's Phase 7 (GitHub PR creation).
+real files, makes a real commit, pushes to a real remote — against
+`repo_path` on disk. Nothing is simulated.
 """
 
 import os
@@ -87,3 +87,13 @@ def changed_files(repo_path: str, base_ref: str) -> list[str]:
     except GitOperationError:
         output = _run_git(repo_path, "diff", "--name-only", "HEAD~1..HEAD")
     return [line for line in output.splitlines() if line.strip()]
+
+
+def push_branch(repo_path: str, branch_name: str, remote_url: str) -> None:
+    """Pushes `branch_name` to `remote_url` (an explicit, possibly
+    credential-embedded URL — see github_client/pr_service — rather than a
+    pre-configured `origin`, so any local working tree can be pushed to a
+    real configured GitHub repo without per-repo remote setup). Raises
+    GitOperationError on a real failure (auth rejected, network error,
+    non-fast-forward, ...) — never silently succeeds."""
+    _run_git(repo_path, "push", remote_url, f"{branch_name}:{branch_name}")

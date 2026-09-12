@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.schemas import ApprovalDecision, ApprovalOut
 from app.db.repositories import ApprovalRepository, RunRepository
 from app.db.session import get_session
+from app.git_integration.pr_service import open_pull_request
 
 router = APIRouter(prefix="/api/approvals", tags=["approvals"])
 
@@ -55,6 +56,14 @@ async def approve(
         approval_id, status="approved", decided_by=payload.decided_by, decided_at=datetime.now(UTC)
     )
     await RunRepository(session).update(approval.run_id, status="completed")
+    # Commit now, before open_pull_request — it queries the Run on its own
+    # connection (async_session_factory), which cannot see this session's
+    # writes until they're committed (get_session's own commit only runs
+    # after this function returns).
+    await session.commit()
+
+    await open_pull_request(approval.run_id)
+
     assert updated is not None
     return ApprovalOut.model_validate(updated)
 
