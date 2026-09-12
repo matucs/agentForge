@@ -191,11 +191,22 @@ are complete.**
 - **`make demo`** (`backend/app/demos/full_demo.py`) — one real task through
   the complete live pipeline with a live agent-activity feed printed as
   events occur; gated on real LLM credentials the same way.
+- **n8n/Slack integration** (`POST /api/webhooks/n8n`,
+  `backend/app/integrations/notifier.py`, see
+  [docs/integrations.md](docs/integrations.md)): an external automation can
+  create and start a real run via one POST (spec §22, and the spec §19
+  support-ticket-to-task flow); the backend posts real outbound webhooks to
+  a configured n8n/Slack URL when a run finishes or needs human approval,
+  and silently no-ops (logged, not faked) when neither is configured.
+  Verified live: started the backend, POSTed a real ticket payload with no
+  webhook configured (confirmed the "no_webhook_configured" no-op log
+  line), then restarted with a webhook URL pointed at a throwaway local
+  HTTP server and confirmed the exact event JSON arrived there for real.
 
 ### What's not built yet
 
-n8n/Slack integration and further hardening are planned in later phases —
-see the roadmap below and [docs/limitations.md](docs/limitations.md).
+Further hardening (Phase 12) is the only remaining planned phase — see the
+roadmap below and [docs/limitations.md](docs/limitations.md).
 
 ## Architecture
 
@@ -272,7 +283,7 @@ npx tsc --noEmit && npm run build
 | 8 ✅ | Observability (structured logs, metrics, tracing, real cost/budget tracking) + evaluation harness |
 | 9 ✅ | Frontend dashboard (runs, tasks, agents, approvals, operations, evaluations) |
 | 10 ✅ | Failure-injection demos (`make demo-failure`, `make demo`) |
-| 11 | n8n / Slack integration |
+| 11 ✅ | n8n / Slack integration (`POST /api/webhooks/n8n`, outbound notifications) |
 | 12 | Hardening, full test suite, deployment docs |
 
 ## License

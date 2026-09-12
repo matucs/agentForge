@@ -8,6 +8,7 @@ from langchain_core.runnables import RunnableConfig
 from app.config import get_settings
 from app.db.repositories import ProjectRepository, RunRepository, TaskRepository
 from app.db.session import async_session_factory
+from app.integrations.notifier import notify_run_finished
 from app.observability.logging import get_logger
 from app.observability.tracing import get_tracer
 from app.orchestration.errors import BudgetExceededError
@@ -111,22 +112,41 @@ async def _run_graph(run_id: str) -> None:
                 )
                 await session.commit()
             _log_run_finished(run_id, status, started_at)
+            # awaiting_approval already notified from policy_node itself.
+            if status != "awaiting_approval":
+                await notify_run_finished(
+                    settings,
+                    run_id=run_id,
+                    task_id=initial_state["task_id"],
+                    status=status,
+                    final_decision=final_state.get("final_decision"),
+                )
 
         except TimeoutError:
+            task_id = await _task_id_for(run_id)
             async with async_session_factory() as session:
                 await RunRepository(session).update(
                     run_id, status="stopped_by_timeout", finished_at=datetime.now(UTC)
                 )
                 await session.commit()
             _log_run_finished(run_id, "stopped_by_timeout", started_at)
+            await notify_run_finished(
+                settings, run_id=run_id, task_id=task_id, status="stopped_by_timeout",
+                final_decision=None,
+            )
 
         except BudgetExceededError:
+            task_id = await _task_id_for(run_id)
             async with async_session_factory() as session:
                 await RunRepository(session).update(
                     run_id, status="stopped_by_budget", finished_at=datetime.now(UTC)
                 )
                 await session.commit()
             _log_run_finished(run_id, "stopped_by_budget", started_at)
+            await notify_run_finished(
+                settings, run_id=run_id, task_id=task_id, status="stopped_by_budget",
+                final_decision=None,
+            )
 
         except asyncio.CancelledError:
             async with async_session_factory() as session:
@@ -139,15 +159,26 @@ async def _run_graph(run_id: str) -> None:
 
         except Exception:
             logger.exception("Run %s failed", run_id)
+            task_id = await _task_id_for(run_id)
             async with async_session_factory() as session:
                 await RunRepository(session).update(
                     run_id, status="failed", finished_at=datetime.now(UTC)
                 )
                 await session.commit()
             _log_run_finished(run_id, "failed", started_at)
+            await notify_run_finished(
+                settings, run_id=run_id, task_id=task_id, status="failed", final_decision=None
+            )
 
         finally:
             _running_tasks.pop(run_id, None)
+
+
+async def _task_id_for(run_id: str) -> str:
+    async with async_session_factory() as session:
+        run = await RunRepository(session).get(run_id)
+        assert run is not None
+        return run.task_id
 
 
 def _log_run_finished(run_id: str, status: str, started_at: float) -> None:

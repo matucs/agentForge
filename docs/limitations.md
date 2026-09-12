@@ -1,4 +1,4 @@
-# Limitations (current state, Phase 10)
+# Limitations (current state, Phase 11)
 
 This file exists so nothing in this repository is misrepresented. It is
 updated at the end of every phase.
@@ -229,17 +229,31 @@ updated at the end of every phase.
   confirmed to print "Integration unavailable. Configure ANTHROPIC_API_KEY
   or OPENAI_API_KEY to enable this feature." and exit non-zero rather than
   fake a run, since no key is configured in this environment.
+- **n8n/Slack integration is real** (`backend/app/integrations/notifier.py`,
+  `POST /api/webhooks/n8n` in `backend/app/api/webhooks.py` — full contract
+  and a worked example in [docs/integrations.md](integrations.md)). The
+  inbound webhook creates and starts a real run through the exact same
+  `orchestration.service.start_run` path the dashboard uses; outbound
+  notifications are real `httpx` POSTs to a configured `N8N_WEBHOOK_URL`/
+  `SLACK_WEBHOOK_URL` on a run reaching a terminal status or needing human
+  approval, and a logged no-op (never a fabricated delivery) when neither
+  is configured. Verified with `httpx.MockTransport` unit tests
+  (`tests/test_notifier.py`, `tests/test_webhooks_api.py`) and manually end
+  to end in this environment: a real webhook call with nothing configured
+  produced the "no_webhook_configured" no-op log line, and pointing
+  `N8N_WEBHOOK_URL` at a throwaway local HTTP server produced a real
+  received `run.finished` JSON payload at that server.
 
 ## What does not exist yet
 
 - No cleanup of the Project/Task/Run rows the demo scripts create in the
   real dev database (only their temp git repos are cleaned up, via
   `tempfile.TemporaryDirectory`) — see Phase 10 trade-offs below.
+- No webhook signature verification on `POST /api/webhooks/n8n`, and no
+  retry/backoff on outbound webhook delivery — see Phase 11 trade-offs
+  below.
 - No dependency/CVE vulnerability database check — Security is a static
   pattern scan only (see Phase 5 trade-offs).
-- No Slack/n8n notification when a run reaches `awaiting_approval` — an
-  operator has to poll `GET /api/approvals` themselves; that integration is
-  Phase 11.
 - No PR update/close/merge operations, and no webhook handling for PR
   status changes coming back from GitHub — only creation.
 - No separate LangSmith/Braintrust integration (see Phase 8 trade-offs
@@ -530,3 +544,25 @@ updated at the end of every phase.
   in a code comment at the exact line it's set, and printed as "(simulated)"
   in every scenario's console output — never presented as if a real
   Reviewer approved the change.
+
+## Known trade-offs made in Phase 11
+
+- **`POST /api/webhooks/n8n` has no authentication or signature
+  verification.** Anyone who can reach the endpoint can create and start a
+  real run. Acceptable for a local/portfolio deployment behind no public
+  ingress; a real deployment would need at minimum a shared-secret header
+  or HMAC signature check, which is a reasonable follow-up, not built here.
+- **Outbound webhook delivery has no retry.** A failed delivery (non-2xx,
+  timeout, connection error) is logged once and dropped — there's no
+  queue, backoff, or dead-letter handling. This matches the project's
+  "don't fake success" rule (a failed delivery is reported as failed, not
+  silently retried into looking fine) but means a transient network blip
+  genuinely loses that one notification; the run's own state in Postgres
+  (`GET /api/runs/:id`, `GET /api/approvals`) remains the source of truth
+  regardless.
+- **The n8n contract accepts a `project_name`/`repo_path` pair to
+  find-or-create a project, keyed on exact name match.** There's no
+  de-duplication beyond that (e.g. no fuzzy matching, no repo-path
+  validation at creation time) — the same trade-off Phase 9's "new task"
+  form already makes for `repo_path`, extended here rather than
+  re-litigated.

@@ -34,6 +34,10 @@ class ProjectRepository:
     async def get(self, project_id: str) -> Project | None:
         return await self._session.get(Project, project_id)
 
+    async def get_by_name(self, name: str) -> Project | None:
+        result = await self._session.execute(select(Project).where(Project.name == name))
+        return result.scalar_one_or_none()
+
     async def list(self) -> list[Project]:
         result = await self._session.execute(select(Project).order_by(Project.created_at.desc()))
         return list(result.scalars().all())

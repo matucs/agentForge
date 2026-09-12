@@ -32,6 +32,7 @@ from app.db.repositories import (
 from app.db.session import async_session_factory
 from app.git_integration.git_ops import changed_files, get_diff
 from app.git_integration.pr_service import open_pull_request
+from app.integrations.notifier import notify_approval_required
 from app.llm.base import LLMUsage
 from app.observability.instrumentation import instrument_node
 from app.orchestration.errors import BudgetExceededError, check_budget_exceeded
@@ -484,14 +485,23 @@ async def policy_node(state: AgentState) -> dict:
         if decision == "AUTO_APPROVED":
             await RunRepository(session).update(state["run_id"], status="completed")
         elif decision == "PENDING_HUMAN_APPROVAL":
+            reason = (
+                f"Risk classified as '{risk}' — requires human sign-off before merge (spec §11)."
+            )
             await ApprovalRepository(session).create(
                 run_id=state["run_id"],
                 action=f"Merge changes for task {state['task_id']}",
                 risk_level=risk,
-                requested_reason=f"Risk classified as '{risk}' — requires human sign-off "
-                "before merge (spec §11).",
+                requested_reason=reason,
             )
             await RunRepository(session).update(state["run_id"], status="awaiting_approval")
+            await notify_approval_required(
+                get_settings(),
+                run_id=state["run_id"],
+                task_id=state["task_id"],
+                risk_level=risk,
+                reason=reason,
+            )
         else:
             # BLOCKED_BY_VERIFICATION or BLOCKED_BY_POLICY: no approval path.
             await RunRepository(session).update(state["run_id"], status="blocked")

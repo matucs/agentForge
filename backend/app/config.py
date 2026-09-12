@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     github_token: str | None = None
     github_repo: str | None = None
 
+    n8n_webhook_url: str | None = None
+    slack_webhook_url: str | None = None
+
     langsmith_api_key: str | None = None
     langsmith_project: str = "agentforge"
 

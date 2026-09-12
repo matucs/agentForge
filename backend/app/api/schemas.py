@@ -220,3 +220,23 @@ class AgentOut(BaseModel):
 
 class NotFoundDetail(BaseModel):
     detail: str
+
+
+class WebhookTaskIn(BaseModel):
+    """Spec §22's n8n webhook contract: an external system (e.g. a support
+    ticket turning into an engineering task) posts this to create and start
+    a real run. Either `project_id` (an existing project) or both
+    `project_name` and `repo_path` (found-or-created by name) must be given."""
+
+    project_id: str | None = None
+    project_name: str | None = None
+    repo_path: str | None = None
+    title: str
+    requirement_text: str
+
+
+class WebhookTaskOut(BaseModel):
+    project_id: str
+    task_id: str
+    run_id: str
+    status: str

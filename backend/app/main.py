@@ -13,6 +13,7 @@ from app.api.operations import router as operations_router
 from app.api.projects import router as projects_router
 from app.api.runs import router as runs_router
 from app.api.tasks import router as tasks_router
+from app.api.webhooks import router as webhooks_router
 from app.observability.logging import configure_logging
 from app.observability.tracing import configure_tracing
 from app.orchestration.graph import setup_checkpointer
@@ -50,3 +51,4 @@ app.include_router(approvals_router)
 app.include_router(metrics_router)
 app.include_router(evaluations_router)
 app.include_router(operations_router)
+app.include_router(webhooks_router)
