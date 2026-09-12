@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     n8n_webhook_url: str | None = None
     slack_webhook_url: str | None = None
 
+    # Additional CORS origin to allow beyond the local dev default (e.g. the
+    # deployed frontend's real origin) — comma-separated if more than one.
+    extra_cors_origins: str | None = None
+
     langsmith_api_key: str | None = None
     langsmith_project: str = "agentforge"
 

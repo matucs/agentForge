@@ -14,6 +14,7 @@ from app.api.projects import router as projects_router
 from app.api.runs import router as runs_router
 from app.api.tasks import router as tasks_router
 from app.api.webhooks import router as webhooks_router
+from app.config import get_settings
 from app.observability.logging import configure_logging
 from app.observability.tracing import configure_tracing
 from app.orchestration.graph import setup_checkpointer
@@ -34,9 +35,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+_cors_origins = ["http://localhost:3000"]
+_extra_origins = get_settings().extra_cors_origins
+if _extra_origins:
+    _cors_origins.extend(o.strip() for o in _extra_origins.split(",") if o.strip())
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
